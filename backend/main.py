@@ -5,7 +5,6 @@ import base64
 from openai import OpenAI
 import os
 from dotenv import load_dotenv
-from pathlib import Path
 
 # ✅ Load environment variables
 load_dotenv()
@@ -14,30 +13,44 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 app = FastAPI()
 
-# ✅ VERY important for browser + Render communication
+# ✅ Allow browser + Render communication
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # safe for early stage apps
+    allow_origins=["*"],  # fine for early stage
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ✅ Serve the scanner UI from / (frontend/index.html)
-FRONTEND_INDEX = Path(__file__).resolve().parent.parent / "frontend" / "index.html"
+############################################################
+# ROOT ROUTE
+############################################################
 
 @app.get("/")
-def serve_scanner():
-    if not FRONTEND_INDEX.exists():
-        return {
-            "error": "index.html not found. Expected frontend/index.html",
-            "expected_path": str(FRONTEND_INDEX)
-        }
-    return FileResponse(str(FRONTEND_INDEX))
+def home():
+    return {"message": "Estate AI Scanner is LIVE 🚀"}
 
-# ✅ IMAGE ANALYSIS ROUTE
+############################################################
+# SERVE FRONTEND
+############################################################
+
+@app.get("/scanner")
+def scanner():
+    file_path = os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "frontend",
+        "index.html"
+    )
+    return FileResponse(file_path)
+
+############################################################
+# IMAGE ANALYSIS
+############################################################
+
 @app.post("/analyze-image")
 async def analyze_image(file: UploadFile = File(...)):
+
     contents = await file.read()
     base64_image = base64.b64encode(contents).decode("utf-8")
 
@@ -68,7 +81,9 @@ Identify the item and return STRICT JSON:
                     {"type": "text", "text": "Identify and price this item."},
                     {
                         "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{base64_image}"
+                        }
                     },
                 ],
             }
@@ -77,4 +92,5 @@ Identify the item and return STRICT JSON:
     )
 
     raw = response.choices[0].message.content
+
     return {"raw": raw}
