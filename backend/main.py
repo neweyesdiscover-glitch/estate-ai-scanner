@@ -1,56 +1,47 @@
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse, FileResponse
 import base64
-from openai import OpenAI
+import json
 import os
-from dotenv import load_dotenv
 
-# ✅ Load environment variables
+from dotenv import load_dotenv
+from openai import OpenAI
+
+# Load environment variables (.env locally; Render uses its own env vars)
 load_dotenv()
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 app = FastAPI()
 
-# ✅ Allow browser + Render communication
+# CORS (ok for early-stage; later restrict to your domain)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # fine for early stage
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-############################################################
-# ROOT ROUTE
-############################################################
+# --- Paths ---
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))         # .../backend
+FRONTEND_INDEX = os.path.join(BASE_DIR, "..", "frontend", "index.html")
 
+# --- Routes ---
 @app.get("/")
 def home():
     return {"message": "Estate AI Scanner is LIVE 🚀"}
 
-############################################################
-# SERVE FRONTEND
-############################################################
-
-@app.get("/scanner")
-def scanner():
-    file_path = os.path.join(
-        os.path.dirname(__file__),
-        "..",
-        "frontend",
-        "index.html"
-    )
-    return FileResponse(file_path)
-
-############################################################
-# IMAGE ANALYSIS
-############################################################
+@app.get("/scanner", response_class=HTMLResponse)
+def scanner_page():
+    # Serve the frontend UI from /scanner
+    if os.path.exists(FRONTEND_INDEX):
+        return FileResponse(FRONTEND_INDEX)
+    return {"error": "frontend/index.html not found. Expected ../frontend/index.html"}
 
 @app.post("/analyze-image")
 async def analyze_image(file: UploadFile = File(...)):
-
     contents = await file.read()
     base64_image = base64.b64encode(contents).decode("utf-8")
 
@@ -62,18 +53,18 @@ async def analyze_image(file: UploadFile = File(...)):
                 "content": """
 You are an expert estate sale appraiser.
 
-Identify the item and return STRICT JSON:
+Return STRICT JSON ONLY (no markdown, no backticks), matching this schema:
 
 {
- "item_name": "",
- "brand_or_origin": "",
- "estimated_value_range": "",
- "suggested_listing_price": "",
- "condition_assumptions": "",
- "keywords_for_listing": "",
- "pricing_sources": ""
+  "item_name": "",
+  "brand_or_origin": "",
+  "estimated_value_range": "",
+  "suggested_listing_price": "",
+  "condition_assumptions": "",
+  "keywords_for_listing": "",
+  "pricing_sources": ""
 }
-"""
+""",
             },
             {
                 "role": "user",
@@ -81,16 +72,24 @@ Identify the item and return STRICT JSON:
                     {"type": "text", "text": "Identify and price this item."},
                     {
                         "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{base64_image}"
-                        }
+                        "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
                     },
                 ],
-            }
+            },
         ],
         max_tokens=500,
     )
 
-    raw = response.choices[0].message.content
+    raw = response.choices[0].message.content or ""
 
-    return {"raw": raw}
+    # Safety: strip any accidental ```json fences then parse
+    cleaned = raw.replace("```json", "").replace("```", "").strip()
+
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        # If model returns non-JSON, return a useful error payload
+        return {
+            "error": "Model did not return valid JSON",
+            "raw": raw,
+        }
