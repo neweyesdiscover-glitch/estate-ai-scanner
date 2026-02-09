@@ -1,198 +1,389 @@
-<!DOCTYPE html>
-<html lang="en">
+<!-- frontend/index.html
+     ✅ Estate AI Scanner — Camera + Gallery + Local History (localStorage)
+     - Works on phones: "Use Camera" opens rear camera
+     - Saves last scans (image + results) in the browser (per device)
+     - Click a past scan to re-open it (no re-scan needed)
+-->
+
+<!doctype html>
+<html>
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Estate AI Scanner</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-
   <style>
-    body {
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #f6f7f9;
-      margin: 0;
-      padding: 30px;
-      color: #222;
+    body { font-family: Arial, sans-serif; padding: 24px; max-width: 1100px; margin: 0 auto; }
+    h1 { margin: 0 0 6px; }
+    .sub { margin: 0 0 16px; color: #555; }
+
+    .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 10px 0 18px; }
+    button { padding: 10px 14px; border-radius: 8px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
+    button.primary { background: #2b7cff; color: #fff; border-color: #2b7cff; font-weight: 700; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    .grid { display: grid; grid-template-columns: 360px 1fr; gap: 18px; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 14px; background: #fff; }
+    .card h3 { margin: 0 0 10px; }
+
+    #preview {
+      width: 100%;
+      max-height: 520px;
+      object-fit: contain;
+      border-radius: 10px;
+      border: 1px solid #eee;
+      display: none;
     }
 
-    h1 {
-      margin-bottom: 5px;
-    }
+    .status { margin: 8px 0 0; color: #666; font-size: 13px; }
+    .ok { color: #0a7a0a; font-weight: 700; }
+    .err { color: #b00020; font-weight: 700; }
 
-    .subtitle {
-      color: #555;
-      margin-bottom: 25px;
-    }
+    .resultLine { margin: 6px 0; line-height: 1.25; }
+    .label { font-weight: 800; }
 
-    .container {
+    .historyList { display: flex; flex-direction: column; gap: 10px; }
+    .historyItem {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 24px;
-      max-width: 1000px;
-    }
-
-    .card {
-      background: #fff;
-      border-radius: 8px;
-      padding: 20px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
-    }
-
-    .controls {
-      margin-bottom: 15px;
-    }
-
-    button {
-      padding: 8px 14px;
-      border-radius: 6px;
-      border: 1px solid #ccc;
-      background: #f3f3f3;
+      grid-template-columns: 72px 1fr;
+      gap: 10px;
+      align-items: center;
+      border: 1px solid #eee;
+      border-radius: 10px;
+      padding: 8px;
       cursor: pointer;
-      font-size: 14px;
     }
+    .historyItem:hover { background: #fafafa; }
+    .thumb { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; border: 1px solid #eee; }
+    .historyMeta { font-size: 13px; color: #444; }
+    .historyMeta .title { font-weight: 800; color: #111; margin-bottom: 2px; }
+    .historyMeta .time { color: #666; font-size: 12px; }
 
-    button:hover {
-      background: #e9e9e9;
-    }
-
-    .preview img {
-      max-width: 100%;
-      border-radius: 6px;
-      margin-top: 10px;
-    }
-
-    .result {
-      font-size: 14px;
-      line-height: 1.5;
-    }
-
-    .result b {
-      display: inline-block;
-      width: 220px;
-    }
-
-    .status {
-      margin-bottom: 10px;
-      font-weight: bold;
-    }
-
-    .error {
-      color: #b00020;
+    pre {
       white-space: pre-wrap;
+      word-break: break-word;
+      background: #f7f7f7;
+      border: 1px solid #eee;
+      padding: 10px;
+      border-radius: 10px;
+      margin: 10px 0 0;
     }
 
-    .success {
-      color: #0a7a3a;
-    }
-
-    @media (max-width: 800px) {
-      .container {
-        grid-template-columns: 1fr;
-      }
-    }
+    .small { font-size: 12px; color: #666; margin-top: 10px; }
   </style>
 </head>
-<body>
 
+<body>
   <h1>Estate AI Scanner</h1>
-  <div class="subtitle">Upload an item to get an instant resale estimate.</div>
+  <p class="sub">Snap a photo, identify the item, and get a resale estimate. (History is saved on this device.)</p>
+
+  <!-- Hidden inputs: Camera + Gallery -->
+  <input id="cameraInput" type="file" accept="image/*" capture="environment" style="display:none" />
+  <input id="galleryInput" type="file" accept="image/*" style="display:none" />
 
   <div class="controls">
-    <input type="file" id="fileInput" accept="image/*" />
-    <button onclick="analyze()">Analyze Item</button>
+    <button onclick="openCamera()">Use Camera</button>
+    <button onclick="openGallery()">Choose From Photos</button>
+    <button id="analyzeBtn" class="primary" onclick="analyze()">Analyze</button>
+    <button onclick="clearHistory()">Clear History</button>
   </div>
 
-  <div class="container">
-    <!-- Preview -->
+  <div class="grid">
     <div class="card">
       <h3>Preview</h3>
-      <div class="preview" id="preview">
-        <em>No image selected.</em>
+      <img id="preview" alt="Preview" />
+      <div id="previewHint" class="status">Select a photo to begin.</div>
+
+      <div class="small">
+        Tip: On phones, “Use Camera” should open the rear camera automatically.
       </div>
     </div>
 
-    <!-- Result -->
     <div class="card">
       <h3>Result</h3>
-      <div class="status" id="status"></div>
-      <div class="result" id="result"></div>
+      <div id="status" class="status"></div>
+      <div id="result"></div>
+    </div>
+
+    <div class="card" style="grid-column: 1 / -1;">
+      <h3>Recent Scans</h3>
+      <div id="history" class="historyList"></div>
+      <div id="historyEmpty" class="status">No scans saved yet.</div>
     </div>
   </div>
 
   <script>
-    const fileInput = document.getElementById("fileInput");
-    const previewEl = document.getElementById("preview");
+    // =========================
+    // Elements
+    // =========================
+    const cameraInput = document.getElementById("cameraInput");
+    const galleryInput = document.getElementById("galleryInput");
+    const preview = document.getElementById("preview");
+    const previewHint = document.getElementById("previewHint");
     const statusEl = document.getElementById("status");
     const resultEl = document.getElementById("result");
+    const analyzeBtn = document.getElementById("analyzeBtn");
+    const historyEl = document.getElementById("history");
+    const historyEmptyEl = document.getElementById("historyEmpty");
 
-    // Show image preview immediately
-    fileInput.addEventListener("change", () => {
-      previewEl.innerHTML = "";
-      const file = fileInput.files[0];
-      if (!file) {
-        previewEl.innerHTML = "<em>No image selected.</em>";
-        return;
-      }
-      const img = document.createElement("img");
-      img.src = URL.createObjectURL(file);
-      previewEl.appendChild(img);
-    });
+    // =========================
+    // Local state
+    // =========================
+    let selectedFile = null;
+    let selectedDataUrl = null; // for history saves
+    const HISTORY_KEY = "estate_ai_history_v1";
+    const HISTORY_LIMIT = 25;
 
-    async function analyze() {
-      resultEl.innerHTML = "";
-      statusEl.textContent = "Analyzing…";
-      statusEl.className = "status";
+    // =========================
+    // Helpers
+    // =========================
+    function escapeHtml(str) {
+      return String(str ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
 
-      const file = fileInput.files[0];
-      if (!file) {
-        statusEl.textContent = "Please select an image first.";
-        statusEl.classList.add("error");
-        return;
-      }
+    function stripCodeFences(s) {
+      return String(s ?? "").replace(/```json|```/gi, "").trim();
+    }
 
-      const formData = new FormData();
-      formData.append("file", file);
+    function nowIso() {
+      return new Date().toISOString();
+    }
 
+    function formatTime(iso) {
       try {
-        // ✅ RELATIVE PATH — works locally and on Render
-        const response = await fetch("/analyze-image", {
-          method: "POST",
-          body: formData
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(`Server error ${response.status}:\n${JSON.stringify(data, null, 2)}`);
-        }
-
-        if (data.error) {
-          throw new Error(`${data.error}\n\n${data.raw || ""}`);
-        }
-
-        statusEl.textContent = "Done ✓";
-        statusEl.classList.add("success");
-
-        renderResult(data);
-
-      } catch (err) {
-        statusEl.textContent = "Error";
-        statusEl.classList.add("error");
-        resultEl.innerHTML = `<div class="error">${err.message}</div>`;
+        const d = new Date(iso);
+        return d.toLocaleString();
+      } catch {
+        return iso;
       }
+    }
+
+    function readHistory() {
+      try {
+        const raw = localStorage.getItem(HISTORY_KEY);
+        return raw ? JSON.parse(raw) : [];
+      } catch {
+        return [];
+      }
+    }
+
+    function writeHistory(items) {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(items));
+    }
+
+    function addToHistory(entry) {
+      const items = readHistory();
+      items.unshift(entry);
+      // de-dupe by timestamp+filename-ish (optional)
+      const trimmed = items.slice(0, HISTORY_LIMIT);
+      writeHistory(trimmed);
+      renderHistory();
+    }
+
+    function clearHistory() {
+      localStorage.removeItem(HISTORY_KEY);
+      renderHistory();
+      statusEl.textContent = "";
+      resultEl.innerHTML = "";
     }
 
     function renderResult(data) {
+      // data is the parsed JSON returned by backend (or {error, raw})
+      if (!data || typeof data !== "object") {
+        resultEl.innerHTML = `<pre>${escapeHtml(String(data))}</pre>`;
+        return;
+      }
+
+      if (data.error) {
+        statusEl.innerHTML = `<span class="err">Error:</span> ${escapeHtml(data.error)}`;
+        if (data.raw) resultEl.innerHTML = `<pre>${escapeHtml(data.raw)}</pre>`;
+        return;
+      }
+
+      // Accept either array/string for keywords/sources
+      const kw = Array.isArray(data.keywords_for_listing)
+        ? data.keywords_for_listing.join(", ")
+        : (data.keywords_for_listing ?? "");
+
+      const sources = Array.isArray(data.pricing_sources)
+        ? data.pricing_sources
+        : (typeof data.pricing_sources === "string" && data.pricing_sources.trim()
+            ? data.pricing_sources.split(",").map(s => s.trim()).filter(Boolean)
+            : []);
+
       resultEl.innerHTML = `
-        <div><b>Item Name:</b> ${data.item_name}</div>
-        <div><b>Brand / Origin:</b> ${data.brand_or_origin}</div>
-        <div><b>Estimated Value Range:</b> ${data.estimated_value_range}</div>
-        <div><b>Suggested Listing Price:</b> ${data.suggested_listing_price}</div>
-        <div><b>Condition Assumptions:</b> ${data.condition_assumptions}</div>
-        <div><b>Keywords for Listing:</b> ${data.keywords_for_listing}</div>
-        <div><b>Pricing Sources:</b> ${data.pricing_sources}</div>
+        <div class="resultLine"><span class="label">Item:</span> ${escapeHtml(data.item_name)}</div>
+        <div class="resultLine"><span class="label">Brand/Origin:</span> ${escapeHtml(data.brand_or_origin)}</div>
+        <div class="resultLine"><span class="label">Estimated Value Range:</span> ${escapeHtml(data.estimated_value_range)}</div>
+        <div class="resultLine"><span class="label">Suggested Listing Price:</span> ${escapeHtml(data.suggested_listing_price)}</div>
+        <div class="resultLine"><span class="label">Condition:</span> ${escapeHtml(data.condition_assumptions)}</div>
+        <div class="resultLine"><span class="label">Keywords:</span> ${escapeHtml(kw)}</div>
+        ${sources.length ? `
+          <div class="resultLine" style="margin-top:10px;">
+            <span class="label">Pricing Sources:</span>
+            <ul>
+              ${sources.map(s => `<li>${escapeHtml(s)}</li>`).join("")}
+            </ul>
+          </div>
+        ` : ""}
       `;
     }
-  </script>
 
+    function renderHistory() {
+      const items = readHistory();
+      historyEl.innerHTML = "";
+
+      if (!items.length) {
+        historyEmptyEl.style.display = "block";
+        return;
+      }
+
+      historyEmptyEl.style.display = "none";
+
+      items.forEach((item, idx) => {
+        const title = item?.result?.item_name || "Unknown item";
+        const time = item?.created_at ? formatTime(item.created_at) : "";
+        const price = item?.result?.suggested_listing_price || "";
+        const range = item?.result?.estimated_value_range || "";
+
+        const div = document.createElement("div");
+        div.className = "historyItem";
+        div.onclick = () => openHistoryItem(idx);
+
+        div.innerHTML = `
+          <img class="thumb" src="${escapeHtml(item.image_data_url || "")}" alt="thumb" />
+          <div class="historyMeta">
+            <div class="title">${escapeHtml(title)}</div>
+            <div>${escapeHtml(range)} ${price ? " • " + escapeHtml(price) : ""}</div>
+            <div class="time">${escapeHtml(time)}</div>
+          </div>
+        `;
+
+        historyEl.appendChild(div);
+      });
+    }
+
+    function openHistoryItem(index) {
+      const items = readHistory();
+      const item = items[index];
+      if (!item) return;
+
+      // Load preview
+      selectedFile = null; // this history item is already scanned
+      selectedDataUrl = item.image_data_url || null;
+
+      if (selectedDataUrl) {
+        preview.src = selectedDataUrl;
+        preview.style.display = "block";
+        previewHint.textContent = "Loaded from history.";
+      }
+
+      // Show result
+      statusEl.innerHTML = `<span class="ok">Loaded ✅</span>`;
+      renderResult(item.result);
+    }
+
+    // =========================
+    // File selection
+    // =========================
+    function openCamera() {
+      cameraInput.value = "";
+      cameraInput.click();
+    }
+
+    function openGallery() {
+      galleryInput.value = "";
+      galleryInput.click();
+    }
+
+    function handleFileSelect(file) {
+      if (!file) return;
+
+      selectedFile = file;
+      statusEl.textContent = "";
+      resultEl.innerHTML = "";
+
+      // Build preview and a base64 data URL for history saving
+      const objectUrl = URL.createObjectURL(file);
+      preview.src = objectUrl;
+      preview.style.display = "block";
+      previewHint.textContent = "Ready to analyze.";
+
+      // Read as base64 data url (for history storage)
+      const reader = new FileReader();
+      reader.onload = () => {
+        selectedDataUrl = reader.result; // "data:image/...;base64,..."
+      };
+      reader.readAsDataURL(file);
+    }
+
+    cameraInput.addEventListener("change", () => handleFileSelect(cameraInput.files?.[0]));
+    galleryInput.addEventListener("change", () => handleFileSelect(galleryInput.files?.[0]));
+
+    // =========================
+    // Analyze
+    // =========================
+    async function analyze() {
+      if (!selectedFile) {
+        statusEl.innerHTML = `<span class="err">Select a photo first.</span>`;
+        return;
+      }
+
+      analyzeBtn.disabled = true;
+      statusEl.textContent = "Analyzing… (first scan may take ~30 seconds if server is waking up)";
+      resultEl.innerHTML = "";
+
+      const formData = new FormData();
+      formData.append("file", selectedFile);
+
+      try {
+        // ✅ Relative path — works when served from same domain (/scanner on Render)
+        const response = await fetch("/analyze-image", { method: "POST", body: formData });
+        const text = await response.text();
+
+        if (!response.ok) {
+          throw new Error(`Server error ${response.status}: ${text}`);
+        }
+
+        // Backend returns JSON; safely parse
+        const cleaned = stripCodeFences(text);
+        let data;
+        try {
+          data = JSON.parse(cleaned);
+        } catch {
+          // If backend returns plain JSON already, cleaned should parse; otherwise show text
+          data = { error: "Could not parse JSON from server", raw: text };
+        }
+
+        statusEl.innerHTML = `<span class="ok">Done ✅</span>`;
+        renderResult(data);
+
+        // Save to local history (image + result)
+        addToHistory({
+          created_at: nowIso(),
+          image_data_url: selectedDataUrl, // base64 image for the thumbnail + reload
+          result: data
+        });
+
+      } catch (err) {
+        console.error(err);
+        statusEl.innerHTML = `<span class="err">Connection error.</span> ${escapeHtml(err.message)}`;
+        resultEl.innerHTML = "";
+      } finally {
+        analyzeBtn.disabled = false;
+      }
+    }
+
+    // =========================
+    // Init
+    // =========================
+    renderHistory();
+  </script>
 </body>
 </html>
