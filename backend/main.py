@@ -1,70 +1,75 @@
-from fastapi.responses import FileResponse
-@app.get("/")
-def home():
-    return FileResponse("index.html")
-
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 import base64
 from openai import OpenAI
 import os
+from dotenv import load_dotenv
+
+# ✅ Load environment variables
+load_dotenv()
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 app = FastAPI()
 
-# 🔥 THIS FIXES 90% OF NGROK PROBLEMS
+# ✅ VERY important for browser + Render communication
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # safe for now — later we lock this down
+    allow_origins=["*"],  # safe for early stage apps
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# ✅ ROOT ROUTE (Fixes the "Not Found" page!)
+@app.get("/")
+def home():
+    return {"message": "Estate AI Scanner is LIVE 🚀"}
 
+# ✅ IMAGE ANALYSIS ROUTE
 @app.post("/analyze-image")
 async def analyze_image(file: UploadFile = File(...)):
 
     contents = await file.read()
     base64_image = base64.b64encode(contents).decode("utf-8")
 
-    prompt = """
-You are an estate sale expert.
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {
+                "role": "system",
+                "content": """
+You are an expert estate sale appraiser.
 
-Return ONLY valid JSON.
+Identify the item and return STRICT JSON:
 
 {
- "item": "",
- "category": "",
- "condition": "",
- "price_range": "",
- "suggested_price": "",
- "confidence": "",
- "keywords": "",
- "pricing_sources": []
+ "item_name": "",
+ "brand_or_origin": "",
+ "estimated_value_range": "",
+ "suggested_listing_price": "",
+ "condition_assumptions": "",
+ "keywords_for_listing": "",
+ "pricing_sources": ""
 }
-
-Use realistic resale values based on secondary markets like eBay sold listings.
 """
-
-    response = client.responses.create(
-        model="gpt-4.1-mini",
-        input=[
+            },
             {
                 "role": "user",
                 "content": [
-                    {"type": "input_text", "text": prompt},
+                    {"type": "text", "text": "Identify and price this item."},
                     {
-                        "type": "input_image",
-                        "image_url": f"data:image/jpeg;base64,{base64_image}",
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{base64_image}"
+                        }
                     },
                 ],
             }
         ],
-        max_output_tokens=500,
+        max_tokens=500,
     )
 
-    raw = response.output_text
+    raw = response.choices[0].message.content
 
     return {"raw": raw}
