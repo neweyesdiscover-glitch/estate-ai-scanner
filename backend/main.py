@@ -1,21 +1,19 @@
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, FileResponse
 import base64
 import json
 import os
-
 from dotenv import load_dotenv
 from openai import OpenAI
 
-# Load environment variables (.env locally; Render uses its own env vars)
+# Load .env locally (Render uses dashboard env vars; this won't hurt)
 load_dotenv()
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 app = FastAPI()
 
-# CORS (ok for early-stage; later restrict to your domain)
+# Browser-friendly (safe for early stage)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -24,21 +22,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Paths ---
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))         # .../backend
-FRONTEND_INDEX = os.path.join(BASE_DIR, "..", "frontend", "index.html")
-
-# --- Routes ---
 @app.get("/")
 def home():
     return {"message": "Estate AI Scanner is LIVE 🚀"}
 
-@app.get("/scanner", response_class=HTMLResponse)
-def scanner_page():
-    # Serve the frontend UI from /scanner
-    if os.path.exists(FRONTEND_INDEX):
-        return FileResponse(FRONTEND_INDEX)
-    return {"error": "frontend/index.html not found. Expected ../frontend/index.html"}
+def _clean_json_text(s: str) -> str:
+    """Remove ```json fences if present and trim whitespace."""
+    if not s:
+        return ""
+    s = s.strip()
+    s = s.replace("```json", "```").replace("```JSON", "```")
+    s = s.replace("```", "").strip()
+    return s
 
 @app.post("/analyze-image")
 async def analyze_image(file: UploadFile = File(...)):
@@ -50,21 +45,19 @@ async def analyze_image(file: UploadFile = File(...)):
         messages=[
             {
                 "role": "system",
-                "content": """
-You are an expert estate sale appraiser.
-
-Return STRICT JSON ONLY (no markdown, no backticks), matching this schema:
-
-{
-  "item_name": "",
-  "brand_or_origin": "",
-  "estimated_value_range": "",
-  "suggested_listing_price": "",
-  "condition_assumptions": "",
-  "keywords_for_listing": "",
-  "pricing_sources": ""
-}
-""",
+                "content": (
+                    "You are an expert estate sale appraiser.\n"
+                    "Return STRICT JSON only. No markdown. No extra commentary.\n\n"
+                    "{\n"
+                    '  "item_name": "",\n'
+                    '  "brand_or_origin": "",\n'
+                    '  "estimated_value_range": "",\n'
+                    '  "suggested_listing_price": "",\n'
+                    '  "condition_assumptions": "",\n'
+                    '  "keywords_for_listing": "",\n'
+                    '  "pricing_sources": ""\n'
+                    "}\n"
+                ),
             },
             {
                 "role": "user",
@@ -77,18 +70,17 @@ Return STRICT JSON ONLY (no markdown, no backticks), matching this schema:
                 ],
             },
         ],
-        max_tokens=500,
+        max_tokens=600,
     )
 
     raw = response.choices[0].message.content or ""
+    cleaned = _clean_json_text(raw)
 
-    # Safety: strip any accidental ```json fences then parse
-    cleaned = raw.replace("```json", "").replace("```", "").strip()
-
+    # Return REAL JSON
     try:
         return json.loads(cleaned)
     except Exception:
-        # If model returns non-JSON, return a useful error payload
+        # Helpful payload for debugging
         return {
             "error": "Model did not return valid JSON",
             "raw": raw,

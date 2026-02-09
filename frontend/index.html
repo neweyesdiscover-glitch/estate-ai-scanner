@@ -1,117 +1,198 @@
-<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Estate AI Scanner</title>
-    <style>
-      body { font-family: Arial; padding: 40px; max-width: 1000px; }
-      .row { display: flex; gap: 20px; margin-top: 20px; }
-      .card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; width: 50%; }
-      img { max-width: 100%; border-radius: 10px; }
-      pre { white-space: pre-wrap; word-wrap: break-word; }
-      .error { color: #b00020; font-weight: bold; }
-      .ok { color: #0a7a0a; font-weight: bold; }
-      button { padding: 8px 14px; }
-    </style>
-  </head>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Estate AI Scanner</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <body>
-    <h1>Estate AI Scanner</h1>
-    <p>Upload an item to get an instant resale estimate.</p>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f6f7f9;
+      margin: 0;
+      padding: 30px;
+      color: #222;
+    }
 
-    <input id="fileInput" type="file" accept="image/*" />
-    <button id="analyzeBtn" onclick="upload()">Analyze Item</button>
+    h1 {
+      margin-bottom: 5px;
+    }
 
-    <div class="row">
-      <div class="card">
-        <h3>Preview</h3>
-        <p style="color:#666;">Selected image will appear here.</p>
-        <img id="preview" style="display:none;" />
-      </div>
+    .subtitle {
+      color: #555;
+      margin-bottom: 25px;
+    }
 
-      <div class="card">
-        <h3>Result</h3>
-        <div id="miniStatus" style="color:#666;">Waiting…</div>
-        <div id="result"></div>
+    .container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      max-width: 1000px;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    }
+
+    .controls {
+      margin-bottom: 15px;
+    }
+
+    button {
+      padding: 8px 14px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      background: #f3f3f3;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    button:hover {
+      background: #e9e9e9;
+    }
+
+    .preview img {
+      max-width: 100%;
+      border-radius: 6px;
+      margin-top: 10px;
+    }
+
+    .result {
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .result b {
+      display: inline-block;
+      width: 220px;
+    }
+
+    .status {
+      margin-bottom: 10px;
+      font-weight: bold;
+    }
+
+    .error {
+      color: #b00020;
+      white-space: pre-wrap;
+    }
+
+    .success {
+      color: #0a7a3a;
+    }
+
+    @media (max-width: 800px) {
+      .container {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Estate AI Scanner</h1>
+  <div class="subtitle">Upload an item to get an instant resale estimate.</div>
+
+  <div class="controls">
+    <input type="file" id="fileInput" accept="image/*" />
+    <button onclick="analyze()">Analyze Item</button>
+  </div>
+
+  <div class="container">
+    <!-- Preview -->
+    <div class="card">
+      <h3>Preview</h3>
+      <div class="preview" id="preview">
+        <em>No image selected.</em>
       </div>
     </div>
 
-    <script>
-      const fileInput = document.getElementById("fileInput");
-      const preview = document.getElementById("preview");
-      const resultEl = document.getElementById("result");
-      const miniStatus = document.getElementById("miniStatus");
-      const analyzeBtn = document.getElementById("analyzeBtn");
+    <!-- Result -->
+    <div class="card">
+      <h3>Result</h3>
+      <div class="status" id="status"></div>
+      <div class="result" id="result"></div>
+    </div>
+  </div>
 
-      fileInput.addEventListener("change", () => {
-        const file = fileInput.files?.[0];
-        if (!file) return;
-        preview.src = URL.createObjectURL(file);
-        preview.style.display = "block";
-      });
+  <script>
+    const fileInput = document.getElementById("fileInput");
+    const previewEl = document.getElementById("preview");
+    const statusEl = document.getElementById("status");
+    const resultEl = document.getElementById("result");
 
-      async function upload() {
-        const file = fileInput.files?.[0];
-        if (!file) {
-          miniStatus.textContent = "Please choose an image first.";
-          return;
-        }
+    // Show image preview immediately
+    fileInput.addEventListener("change", () => {
+      previewEl.innerHTML = "";
+      const file = fileInput.files[0];
+      if (!file) {
+        previewEl.innerHTML = "<em>No image selected.</em>";
+        return;
+      }
+      const img = document.createElement("img");
+      img.src = URL.createObjectURL(file);
+      previewEl.appendChild(img);
+    });
 
-        analyzeBtn.disabled = true;
-        miniStatus.textContent = "Analyzing…";
-        resultEl.innerHTML = "";
+    async function analyze() {
+      resultEl.innerHTML = "";
+      statusEl.textContent = "Analyzing…";
+      statusEl.className = "status";
 
-        const formData = new FormData();
-        formData.append("file", file);
-
-        try {
-          // Relative path = same host (works on Render + local)
-          const response = await fetch("/analyze-image", {
-            method: "POST",
-            body: formData
-          });
-
-          const text = await response.text();
-
-          if (!response.ok) {
-            throw new Error(`Server error ${response.status}: ${text}`);
-          }
-
-          // Try parse JSON from backend
-          // (Backend returns JSON; this also handles any accidental code fences)
-          let cleaned = text.replace(/```json|```/g, "").trim();
-          let data;
-          try {
-            data = JSON.parse(cleaned);
-          } catch (e) {
-            throw new Error("Could not parse JSON from server:\n" + text);
-          }
-
-          if (data.error) {
-            miniStatus.innerHTML = `<span class="error">Error:</span> ${data.error}`;
-            resultEl.innerHTML = `<pre>${escapeHtml(data.raw || "")}</pre>`;
-            return;
-          }
-
-          miniStatus.innerHTML = `<span class="ok">Done ✅</span>`;
-          resultEl.innerHTML = `<pre>${escapeHtml(JSON.stringify(data, null, 2))}</pre>`;
-
-        } catch (err) {
-          miniStatus.innerHTML = `<span class="error">Connection error.</span> ${escapeHtml(err.message)}`;
-          resultEl.innerHTML = "";
-        } finally {
-          analyzeBtn.disabled = false;
-        }
+      const file = fileInput.files[0];
+      if (!file) {
+        statusEl.textContent = "Please select an image first.";
+        statusEl.classList.add("error");
+        return;
       }
 
-      function escapeHtml(str) {
-        return String(str)
-          .replaceAll("&", "&amp;")
-          .replaceAll("<", "&lt;")
-          .replaceAll(">", "&gt;")
-          .replaceAll('"', "&quot;")
-          .replaceAll("'", "&#039;");
+      const formData = new FormData();
+      formData.append("file", file);
+
+      try {
+        // ✅ RELATIVE PATH — works locally and on Render
+        const response = await fetch("/analyze-image", {
+          method: "POST",
+          body: formData
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(`Server error ${response.status}:\n${JSON.stringify(data, null, 2)}`);
+        }
+
+        if (data.error) {
+          throw new Error(`${data.error}\n\n${data.raw || ""}`);
+        }
+
+        statusEl.textContent = "Done ✓";
+        statusEl.classList.add("success");
+
+        renderResult(data);
+
+      } catch (err) {
+        statusEl.textContent = "Error";
+        statusEl.classList.add("error");
+        resultEl.innerHTML = `<div class="error">${err.message}</div>`;
       }
-    </script>
-  </body>
+    }
+
+    function renderResult(data) {
+      resultEl.innerHTML = `
+        <div><b>Item Name:</b> ${data.item_name}</div>
+        <div><b>Brand / Origin:</b> ${data.brand_or_origin}</div>
+        <div><b>Estimated Value Range:</b> ${data.estimated_value_range}</div>
+        <div><b>Suggested Listing Price:</b> ${data.suggested_listing_price}</div>
+        <div><b>Condition Assumptions:</b> ${data.condition_assumptions}</div>
+        <div><b>Keywords for Listing:</b> ${data.keywords_for_listing}</div>
+        <div><b>Pricing Sources:</b> ${data.pricing_sources}</div>
+      `;
+    }
+  </script>
+
+</body>
 </html>
