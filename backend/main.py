@@ -1,3 +1,8 @@
+from fastapi.responses import FileResponse
+@app.get("/")
+def home():
+    return FileResponse("index.html")
+
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 import base64
