@@ -46,10 +46,23 @@ BASE_DIR = Path(__file__).resolve().parent  # backend/
 FRONTEND_INDEX = BASE_DIR.parent / "frontend" / "index.html"
 
 # Storage paths (use Render Disk for true persistence)
-DATA_DIR = BASE_DIR  # keep in backend/ so it’s easy
+# -----------------------------
+# Persistent Storage (Render Disk)
+# -----------------------------
+
+# If Render disk exists → use it
+PERSISTENT_DIR = Path("/var/data")
+
+if PERSISTENT_DIR.exists():
+    DATA_DIR = PERSISTENT_DIR
+else:
+    # fallback for local development
+    DATA_DIR = BASE_DIR
+
 DB_PATH = DATA_DIR / "scans.db"
 UPLOAD_DIR = DATA_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
 
 # -----------------------------
 # Database
