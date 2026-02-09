@@ -3,3 +3,6 @@ uvicorn[standard]
 python-dotenv
 openai
 python-multipart
+itsdangerous
+python-jose[cryptography]
+passlib[bcrypt]
