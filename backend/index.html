@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Estate AI Scanner</title>
+
+<style>
+
+body{
+    font-family: Arial;
+    padding:40px;
+    max-width:1100px;
+}
+
+.container{
+    display:flex;
+    gap:40px;
+    margin-top:30px;
+}
+
+.preview{
+    width:350px;
+}
+
+.preview img{
+    width:100%;
+    border-radius:10px;
+}
+
+.result{
+    flex:1;
+    background:#f7f7f7;
+    padding:25px;
+    border-radius:12px;
+    line-height:1.6;
+}
+
+.label{
+    font-weight:bold;
+}
+
+button{
+    padding:10px 18px;
+    font-size:16px;
+    cursor:pointer;
+}
+
+</style>
+</head>
+
+<body>
+
+<h1>Estate AI Scanner</h1>
+<p>Upload an item to get an instant resale estimate.</p>
+
+<input type="file" id="fileInput">
+<button onclick="upload()">Analyze Item</button>
+
+<div class="container">
+
+<div class="preview">
+<h3>Preview</h3>
+<img id="previewImage"/>
+</div>
+
+<div class="result" id="result">
+Results will appear here.
+</div>
+
+</div>
+
+<script>
+
+async function upload(){
+
+    const fileInput = document.getElementById("fileInput");
+    const file = fileInput.files[0];
+
+    if(!file){
+        alert("Choose a file first!");
+        return;
+    }
+
+    // Show preview
+    document.getElementById("previewImage").src =
+        URL.createObjectURL(file);
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+
+    /*
+    ======================================================
+
+        🔥🔥🔥 IMPORTANT — BACKEND URL GOES HERE 🔥🔥🔥
+
+    LOCAL TESTING:
+    Use this when running uvicorn on your computer.
+
+        http://127.0.0.1:8000/analyze-image
+
+
+    PUBLIC / PHONE TESTING:
+    Replace the URL below with your NGROK forwarding URL.
+
+    Example:
+        https://abcd1234.ngrok-free.app/analyze-image
+
+
+    NOTE:
+    Every time ngrok restarts — this URL changes.
+    Just paste the new one here.
+
+    ======================================================
+    */
+
+
+    const response = await fetch(
+        "http://127.0.0.1:8000/analyze-image",
+        {
+            method:"POST",
+            body:formData
+        }
+    );
+
+    const data = await response.json();
+
+    const r = data;
+
+    document.getElementById("result").innerHTML = `
+        <div class="label">Item:</div> ${r.item}
+
+        <div class="label">Category:</div> ${r.category}
+
+        <div class="label">Condition:</div> ${r.condition}
+
+        <div class="label">Estimated Price Range:</div> ${r.price_range}
+
+        <div class="label">Suggested Listing Price:</div> ${r.suggested_price}
+
+        <div class="label">Confidence:</div> ${r.confidence}
+
+        <div class="label">Keywords:</div> ${r.keywords}
+
+        <div class="label">Pricing Sources:</div>
+        <ul>
+            ${r.sources.map(s=>`<li>${s}</li>`).join("")}
+        </ul>
+    `;
+}
+
+</script>
+
+</body>
+</html>
