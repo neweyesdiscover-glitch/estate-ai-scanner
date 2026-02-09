@@ -1,5 +1,9 @@
 <!-- frontend/index.html
-     ✅ Company login + camera + gallery + local history + shared TEAM history
+     ✅ Estate AI Scanner — Company Login + Camera + Local History + Shared Team History
+     - Login required (company + passcode)
+     - "Use Camera" opens rear camera on phones
+     - Local History saved per device (localStorage)
+     - Team History shared across same company (server DB)
 -->
 
 <!doctype html>
@@ -40,8 +44,8 @@
     .resultLine { margin: 6px 0; line-height: 1.25; }
     .label { font-weight: 800; }
 
-    .list { display: flex; flex-direction: column; gap: 10px; }
-    .itemRow {
+    .historyList { display: flex; flex-direction: column; gap: 10px; }
+    .historyItem {
       display: grid;
       grid-template-columns: 72px 1fr;
       gap: 10px;
@@ -51,44 +55,76 @@
       padding: 8px;
       cursor: pointer;
     }
-    .itemRow:hover { background: #fafafa; }
+    .historyItem:hover { background: #fafafa; }
     .thumb { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; border: 1px solid #eee; }
-    .meta { font-size: 13px; color: #444; }
-    .meta .title { font-weight: 800; color: #111; margin-bottom: 2px; }
-    .meta .time { color: #666; font-size: 12px; }
+    .historyMeta { font-size: 13px; color: #444; }
+    .historyMeta .title { font-weight: 800; color: #111; margin-bottom: 2px; }
+    .historyMeta .time { color: #666; font-size: 12px; }
+
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #f7f7f7;
+      border: 1px solid #eee;
+      padding: 10px;
+      border-radius: 10px;
+      margin: 10px 0 0;
+    }
 
     .small { font-size: 12px; color: #666; margin-top: 10px; }
 
-    /* Login overlay */
+    /* =========================
+       Login modal
+       ========================= */
     .overlay {
-      position: fixed; inset: 0; background: rgba(0,0,0,0.55);
-      display: none; align-items: center; justify-content: center; padding: 20px;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.35);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+      z-index: 999;
     }
     .modal {
-      width: 100%; max-width: 420px; background: #fff; border-radius: 14px; padding: 16px; border: 1px solid #ddd;
+      width: 520px;
+      max-width: 100%;
+      background: white;
+      border-radius: 14px;
+      border: 1px solid #ddd;
+      box-shadow: 0 12px 35px rgba(0,0,0,0.25);
+      padding: 16px;
     }
-    .modal h2 { margin: 0 0 8px; }
-    .row { display: grid; gap: 8px; margin-top: 10px; }
-    input {
-      padding: 10px; border-radius: 10px; border: 1px solid #ccc; font-size: 14px; width: 100%;
+    .modal h2 { margin: 0 0 4px; }
+    .tabs { display: flex; gap: 10px; margin: 10px 0 14px; }
+    .tab {
+      padding: 8px 10px;
+      border-radius: 10px;
+      border: 1px solid #ddd;
+      cursor: pointer;
+      background: #fafafa;
+      font-weight: 700;
     }
-    .tabs { display: flex; gap: 8px; margin-top: 8px; }
-    .tab { padding: 8px 10px; border-radius: 10px; border: 1px solid #ddd; cursor: pointer; }
-    .tab.active { background: #2b7cff; border-color: #2b7cff; color: #fff; font-weight: 700; }
+    .tab.active { background: #2b7cff; color: #fff; border-color: #2b7cff; }
+    .field { margin: 10px 0; }
+    .field input {
+      width: 100%;
+      padding: 10px;
+      border-radius: 10px;
+      border: 1px solid #ddd;
+      font-size: 14px;
+    }
+    .modalActions { margin-top: 12px; display: flex; gap: 10px; }
+    .modalMsg { margin-top: 8px; font-size: 13px; color: #b00020; }
+    .whoami { margin: 8px 0 0; font-size: 13px; color: #555; }
   </style>
 </head>
 
 <body>
   <h1>Estate AI Scanner</h1>
-  <p class="sub">Company login required. Snap a photo, identify the item, and get an estimate.</p>
+  <p class="sub" id="subtitle">Company login required. Snap a photo, identify the item, and get an estimate.</p>
 
-  <!-- Login status -->
-  <div class="controls">
-    <div id="whoami" class="status" style="flex:1;"></div>
-    <button id="logoutBtn" onclick="logout()" style="display:none;">Logout</button>
-  </div>
-
-  <!-- Hidden inputs -->
+  <!-- Hidden inputs: Camera + Gallery -->
   <input id="cameraInput" type="file" accept="image/*" capture="environment" style="display:none" />
   <input id="galleryInput" type="file" accept="image/*" style="display:none" />
 
@@ -96,8 +132,10 @@
     <button onclick="openCamera()">Use Camera</button>
     <button onclick="openGallery()">Choose From Photos</button>
     <button id="analyzeBtn" class="primary" onclick="analyze()">Analyze</button>
+
     <button onclick="refreshTeamHistory()">Refresh Team History</button>
     <button onclick="clearLocalHistory()">Clear Local History</button>
+    <button onclick="logout()" style="margin-left:auto;">Logout</button>
   </div>
 
   <div class="grid">
@@ -105,7 +143,10 @@
       <h3>Preview</h3>
       <img id="preview" alt="Preview" />
       <div id="previewHint" class="status">Select a photo to begin.</div>
-      <div class="small">Tip: On phones, “Use Camera” opens the rear camera.</div>
+
+      <div class="small">
+        Tip: On phones, “Use Camera” should open the rear camera automatically.
+      </div>
     </div>
 
     <div class="card">
@@ -114,36 +155,43 @@
       <div id="result"></div>
     </div>
 
-    <div class="card">
+    <div class="card" style="grid-column: 1 / -1;">
       <h3>Team History (shared)</h3>
-      <div id="teamHistory" class="list"></div>
+      <div id="teamHistory" class="historyList"></div>
       <div id="teamEmpty" class="status">No team scans yet.</div>
     </div>
 
-    <div class="card">
+    <div class="card" style="grid-column: 1 / -1;">
       <h3>Local History (this device)</h3>
-      <div id="localHistory" class="list"></div>
-      <div id="localEmpty" class="status">No local scans yet.</div>
+      <div id="history" class="historyList"></div>
+      <div id="historyEmpty" class="status">No local scans saved yet.</div>
     </div>
   </div>
 
-  <!-- Login overlay -->
+  <!-- Login Modal -->
   <div id="overlay" class="overlay">
     <div class="modal">
       <h2>Company Login</h2>
-      <div class="status" style="margin:0;">Use your company name + passcode.</div>
+      <div class="small">Use your company name + passcode.</div>
 
       <div class="tabs">
-        <div id="tabLogin" class="tab active" onclick="setMode('login')">Login</div>
-        <div id="tabSignup" class="tab" onclick="setMode('signup')">Create Company</div>
+        <div id="tabLogin" class="tab active" onclick="setAuthMode('login')">Login</div>
+        <div id="tabCreate" class="tab" onclick="setAuthMode('create')">Create Company</div>
       </div>
 
-      <div class="row">
-        <input id="companyName" placeholder="Company name (e.g., Smith Estate Sales)" />
-        <input id="passcode" placeholder="Passcode (share with your staff)" type="password" />
-        <button class="primary" onclick="submitAuth()" id="authBtn">Login</button>
-        <div id="authStatus" class="status"></div>
+      <div class="field">
+        <input id="companyInput" placeholder="company name (e.g. demo)" />
       </div>
+      <div class="field">
+        <input id="passcodeInput" placeholder="passcode" type="password" />
+      </div>
+
+      <div class="modalActions">
+        <button class="primary" onclick="submitAuth()" id="authBtn">Login</button>
+      </div>
+
+      <div class="modalMsg" id="authMsg"></div>
+      <div class="whoami" id="whoami"></div>
     </div>
   </div>
 
@@ -159,174 +207,91 @@
     const resultEl = document.getElementById("result");
     const analyzeBtn = document.getElementById("analyzeBtn");
 
-    const whoamiEl = document.getElementById("whoami");
-    const logoutBtn = document.getElementById("logoutBtn");
-
-    const overlay = document.getElementById("overlay");
-    const authStatus = document.getElementById("authStatus");
-    const companyName = document.getElementById("companyName");
-    const passcode = document.getElementById("passcode");
-    const authBtn = document.getElementById("authBtn");
-    const tabLogin = document.getElementById("tabLogin");
-    const tabSignup = document.getElementById("tabSignup");
+    const historyEl = document.getElementById("history");
+    const historyEmptyEl = document.getElementById("historyEmpty");
 
     const teamHistoryEl = document.getElementById("teamHistory");
     const teamEmptyEl = document.getElementById("teamEmpty");
-    const localHistoryEl = document.getElementById("localHistory");
-    const localEmptyEl = document.getElementById("localEmpty");
+
+    const overlay = document.getElementById("overlay");
+    const tabLogin = document.getElementById("tabLogin");
+    const tabCreate = document.getElementById("tabCreate");
+    const authBtn = document.getElementById("authBtn");
+    const authMsg = document.getElementById("authMsg");
+    const whoami = document.getElementById("whoami");
+
+    const companyInput = document.getElementById("companyInput");
+    const passcodeInput = document.getElementById("passcodeInput");
 
     // =========================
-    // State
+    // Local state
     // =========================
-    let authMode = "login"; // or "signup"
     let selectedFile = null;
-    let selectedDataUrl = null;
-    let lastObjectUrl = null;
+    let selectedDataUrl = null; // for local history saves
+    let authMode = "login";     // "login" or "create"
+    let currentCompany = null;
 
-    const LOCAL_KEY = "estate_ai_local_history_v2";
-    const LOCAL_LIMIT = 25;
+    const LOCAL_HISTORY_KEY = "estate_ai_local_history_v1";
+    const LOCAL_HISTORY_LIMIT = 25;
 
     // =========================
     // Helpers
     // =========================
     function escapeHtml(str) {
       return String(str ?? "")
-        .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;").replaceAll("'", "&#039;");
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
     }
-    function stripCodeFences(s) { return String(s ?? "").replace(/```json|```/gi, "").trim(); }
-    function nowIso() { return new Date().toISOString(); }
-    function formatTime(iso) { try { return new Date(iso).toLocaleString(); } catch { return iso; } }
 
-    async function api(path, options = {}) {
-      // IMPORTANT: include cookies for session login
-      const res = await fetch(path, { credentials: "include", ...options });
-      const text = await res.text();
-      let data = null;
-      try { data = JSON.parse(stripCodeFences(text)); } catch { data = text; }
-      if (!res.ok) {
-        const msg = (data && data.detail) ? data.detail : text;
-        throw new Error(`HTTP ${res.status}: ${msg}`);
-      }
-      return data;
+    function nowIso() {
+      return new Date().toISOString();
+    }
+
+    function formatTime(iso) {
+      try { return new Date(iso).toLocaleString(); }
+      catch { return iso; }
+    }
+
+    async function readJsonOrText(resp) {
+      const ct = resp.headers.get("content-type") || "";
+      if (ct.includes("application/json")) return await resp.json();
+      const text = await resp.text();
+      try { return JSON.parse(text); } catch { return { detail: text }; }
     }
 
     // =========================
-    // Auth UI
+    // Local history (device)
     // =========================
-    function setMode(mode) {
-      authMode = mode;
-      authStatus.textContent = "";
-      if (mode === "login") {
-        tabLogin.classList.add("active"); tabSignup.classList.remove("active");
-        authBtn.textContent = "Login";
-      } else {
-        tabSignup.classList.add("active"); tabLogin.classList.remove("active");
-        authBtn.textContent = "Create Company";
-      }
-    }
-
-    async function checkLogin() {
+    function readLocalHistory() {
       try {
-        const me = await api("/me");
-        if (me.logged_in) {
-          overlay.style.display = "none";
-          whoamiEl.innerHTML = `<span class="ok">Logged in:</span> ${escapeHtml(me.company.name)}`;
-          logoutBtn.style.display = "inline-block";
-          await refreshTeamHistory();
-        } else {
-          overlay.style.display = "flex";
-          whoamiEl.textContent = "Not logged in";
-          logoutBtn.style.display = "none";
-        }
-      } catch (e) {
-        overlay.style.display = "flex";
-        whoamiEl.innerHTML = `<span class="err">Login required</span>`;
+        const raw = localStorage.getItem(LOCAL_HISTORY_KEY);
+        return raw ? JSON.parse(raw) : [];
+      } catch {
+        return [];
       }
     }
 
-    async function submitAuth() {
-      authStatus.textContent = "Working…";
-      try {
-        const payload = {
-          name: companyName.value.trim(),
-          passcode: passcode.value.trim()
-        };
-        if (!payload.name || !payload.passcode) {
-          authStatus.innerHTML = `<span class="err">Enter company name + passcode.</span>`;
-          return;
-        }
-
-        if (authMode === "signup") {
-          await api("/signup-company", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
-          });
-        } else {
-          await api("/login", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
-          });
-        }
-
-        authStatus.innerHTML = `<span class="ok">Success ✅</span>`;
-        await checkLogin();
-      } catch (e) {
-        authStatus.innerHTML = `<span class="err">${escapeHtml(e.message)}</span>`;
-      }
+    function writeLocalHistory(items) {
+      localStorage.setItem(LOCAL_HISTORY_KEY, JSON.stringify(items));
     }
 
-    async function logout() {
-      try { await api("/logout", { method: "POST" }); } catch {}
-      overlay.style.display = "flex";
-      whoamiEl.textContent = "Not logged in";
-      logoutBtn.style.display = "none";
+    function addToLocalHistory(entry) {
+      const items = readLocalHistory();
+      items.unshift(entry);
+      writeLocalHistory(items.slice(0, LOCAL_HISTORY_LIMIT));
+      renderLocalHistory();
     }
 
-    // =========================
-    // File selection
-    // =========================
-    function openCamera() { cameraInput.value = ""; cameraInput.click(); }
-    function openGallery() { galleryInput.value = ""; galleryInput.click(); }
-
-    function handleFileSelect(file) {
-      if (!file) return;
-
-      selectedFile = file;
-      selectedDataUrl = null;
-
+    function clearLocalHistory() {
+      localStorage.removeItem(LOCAL_HISTORY_KEY);
+      renderLocalHistory();
       statusEl.textContent = "";
       resultEl.innerHTML = "";
-
-      analyzeBtn.disabled = true;
-      previewHint.textContent = "Loading image…";
-
-      if (lastObjectUrl) URL.revokeObjectURL(lastObjectUrl);
-      lastObjectUrl = URL.createObjectURL(file);
-      preview.src = lastObjectUrl;
-      preview.style.display = "block";
-
-      const reader = new FileReader();
-      reader.onload = () => {
-        selectedDataUrl = reader.result;
-        previewHint.textContent = "Ready to analyze.";
-        analyzeBtn.disabled = false;
-      };
-      reader.onerror = () => {
-        previewHint.textContent = "Could not read image.";
-        analyzeBtn.disabled = false;
-      };
-      reader.readAsDataURL(file);
     }
 
-    cameraInput.addEventListener("change", () => handleFileSelect(cameraInput.files?.[0]));
-    galleryInput.addEventListener("change", () => handleFileSelect(galleryInput.files?.[0]));
-
-    // =========================
-    // Result rendering
-    // =========================
     function renderResult(data) {
       if (!data || typeof data !== "object") {
         resultEl.innerHTML = `<pre>${escapeHtml(String(data))}</pre>`;
@@ -365,164 +330,285 @@
       `;
     }
 
+    function renderLocalHistory() {
+      const items = readLocalHistory();
+      historyEl.innerHTML = "";
+
+      if (!items.length) {
+        historyEmptyEl.style.display = "block";
+        return;
+      }
+      historyEmptyEl.style.display = "none";
+
+      items.forEach((item, idx) => {
+        const title = item?.result?.item_name || "Unknown item";
+        const time = item?.created_at ? formatTime(item.created_at) : "";
+        const price = item?.result?.suggested_listing_price || "";
+        const range = item?.result?.estimated_value_range || "";
+
+        const div = document.createElement("div");
+        div.className = "historyItem";
+        div.onclick = () => openLocalHistoryItem(idx);
+
+        div.innerHTML = `
+          <img class="thumb" src="${escapeHtml(item.image_data_url || "")}" alt="thumb" />
+          <div class="historyMeta">
+            <div class="title">${escapeHtml(title)}</div>
+            <div>${escapeHtml(range)} ${price ? " • " + escapeHtml(price) : ""}</div>
+            <div class="time">${escapeHtml(time)}</div>
+          </div>
+        `;
+
+        historyEl.appendChild(div);
+      });
+    }
+
+    function openLocalHistoryItem(index) {
+      const items = readLocalHistory();
+      const item = items[index];
+      if (!item) return;
+
+      selectedFile = null; // already analyzed
+      selectedDataUrl = item.image_data_url || null;
+
+      if (selectedDataUrl) {
+        preview.src = selectedDataUrl;
+        preview.style.display = "block";
+        previewHint.textContent = "Loaded from local history.";
+      }
+
+      statusEl.innerHTML = `<span class="ok">Loaded ✅</span>`;
+      renderResult(item.result);
+    }
+
     // =========================
-    // Local history (device)
+    // Team History (shared)
     // =========================
-    function readLocal() {
-      try { return JSON.parse(localStorage.getItem(LOCAL_KEY) || "[]"); } catch { return []; }
-    }
-    function writeLocal(items) {
-      localStorage.setItem(LOCAL_KEY, JSON.stringify(items));
-    }
-    function addLocal(entry) {
-      const items = readLocal();
-      items.unshift(entry);
-      writeLocal(items.slice(0, LOCAL_LIMIT));
-      renderLocal();
-    }
-    function clearLocalHistory() {
-      localStorage.removeItem(LOCAL_KEY);
-      renderLocal();
-    }
-    function renderLocal() {
-      const items = readLocal();
-      localHistoryEl.innerHTML = "";
-      if (!items.length) { localEmptyEl.style.display = "block"; return; }
-      localEmptyEl.style.display = "none";
+    function renderTeamHistory(items) {
+      teamHistoryEl.innerHTML = "";
+      if (!items || !items.length) {
+        teamEmptyEl.style.display = "block";
+        return;
+      }
+      teamEmptyEl.style.display = "none";
 
       items.forEach((item) => {
         const title = item?.result?.item_name || "Unknown item";
         const time = item?.created_at ? formatTime(item.created_at) : "";
-        const range = item?.result?.estimated_value_range || "";
         const price = item?.result?.suggested_listing_price || "";
+        const range = item?.result?.estimated_value_range || "";
 
         const div = document.createElement("div");
-        div.className = "itemRow";
+        div.className = "historyItem";
         div.onclick = () => {
+          // open result (no re-scan)
           selectedFile = null;
           selectedDataUrl = item.image_data_url || null;
-          if (selectedDataUrl) { preview.src = selectedDataUrl; preview.style.display = "block"; }
+          if (selectedDataUrl) {
+            preview.src = selectedDataUrl;
+            preview.style.display = "block";
+            previewHint.textContent = "Loaded from team history.";
+          }
           statusEl.innerHTML = `<span class="ok">Loaded ✅</span>`;
           renderResult(item.result);
         };
 
         div.innerHTML = `
           <img class="thumb" src="${escapeHtml(item.image_data_url || "")}" alt="thumb" />
-          <div class="meta">
+          <div class="historyMeta">
             <div class="title">${escapeHtml(title)}</div>
             <div>${escapeHtml(range)} ${price ? " • " + escapeHtml(price) : ""}</div>
             <div class="time">${escapeHtml(time)}</div>
           </div>
         `;
-        localHistoryEl.appendChild(div);
+        teamHistoryEl.appendChild(div);
       });
     }
 
-    // =========================
-    // Team history (server)
-    // =========================
     async function refreshTeamHistory() {
       try {
-        const payload = await api("/history?limit=50");
-        const items = payload.items || [];
-
-        teamHistoryEl.innerHTML = "";
-        if (!items.length) { teamEmptyEl.style.display = "block"; return; }
-        teamEmptyEl.style.display = "none";
-
-        items.forEach((item) => {
-          const title = item?.result?.item_name || "Unknown item";
-          const time = item?.created_at ? formatTime(item.created_at) : "";
-          const range = item?.result?.estimated_value_range || "";
-          const price = item?.result?.suggested_listing_price || "";
-          const img = item.image_url;
-
-          const div = document.createElement("div");
-          div.className = "itemRow";
-          div.onclick = () => {
-            // Load server image
-            preview.src = img;
-            preview.style.display = "block";
-            previewHint.textContent = "Loaded from team history.";
-            statusEl.innerHTML = `<span class="ok">Loaded ✅</span>`;
-            renderResult(item.result);
-          };
-
-          div.innerHTML = `
-            <img class="thumb" src="${escapeHtml(img)}" alt="thumb" />
-            <div class="meta">
-              <div class="title">${escapeHtml(title)}</div>
-              <div>${escapeHtml(range)} ${price ? " • " + escapeHtml(price) : ""}</div>
-              <div class="time">${escapeHtml(time)}</div>
-            </div>
-          `;
-          teamHistoryEl.appendChild(div);
-        });
-
+        const resp = await fetch("/team/history?limit=25");
+        if (!resp.ok) {
+          const err = await readJsonOrText(resp);
+          if (resp.status === 401) showLogin(true, "Login required");
+          return;
+        }
+        const data = await resp.json();
+        renderTeamHistory(data.items || []);
       } catch (e) {
-        teamEmptyEl.style.display = "block";
-        teamEmptyEl.innerHTML = `<span class="err">Team history unavailable:</span> ${escapeHtml(e.message)}`;
+        console.error(e);
       }
     }
 
     // =========================
-    // Analyze (requires login)
+    // Auth modal
+    // =========================
+    function setAuthMode(mode) {
+      authMode = mode;
+      authMsg.textContent = "";
+      tabLogin.classList.toggle("active", mode === "login");
+      tabCreate.classList.toggle("active", mode === "create");
+      authBtn.textContent = mode === "login" ? "Login" : "Create Company";
+    }
+
+    function showLogin(show, message) {
+      overlay.style.display = show ? "flex" : "none";
+      authMsg.textContent = message || "";
+    }
+
+    async function submitAuth() {
+      authMsg.textContent = "";
+      const company = (companyInput.value || "").trim();
+      const passcode = (passcodeInput.value || "").trim();
+
+      if (!company || !passcode) {
+        authMsg.textContent = "Enter company + passcode.";
+        return;
+      }
+
+      const endpoint = authMode === "login" ? "/login" : "/company/create";
+
+      try {
+        const resp = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ company, passcode })
+        });
+
+        const data = await readJsonOrText(resp);
+
+        if (!resp.ok) {
+          // display FastAPI error cleanly
+          authMsg.textContent = data?.detail || "Request failed.";
+          return;
+        }
+
+        if (authMode === "create") {
+          // after creation, switch to login for clarity
+          setAuthMode("login");
+          authMsg.textContent = "Company created. Now login.";
+          return;
+        }
+
+        // Logged in
+        currentCompany = data.company;
+        whoami.textContent = `Logged in as: ${currentCompany}`;
+        showLogin(false);
+
+        await refreshTeamHistory();
+
+      } catch (e) {
+        console.error(e);
+        authMsg.textContent = "Network error.";
+      }
+    }
+
+    async function ensureLoggedIn() {
+      try {
+        const resp = await fetch("/me");
+        const data = await resp.json();
+        if (!data.logged_in) {
+          showLogin(true, "");
+        } else {
+          currentCompany = data.company;
+          whoami.textContent = `Logged in as: ${currentCompany}`;
+          showLogin(false);
+          await refreshTeamHistory();
+        }
+      } catch (e) {
+        console.error(e);
+        showLogin(true, "Could not reach server.");
+      }
+    }
+
+    async function logout() {
+      try {
+        await fetch("/logout", { method: "POST" });
+      } catch {}
+      currentCompany = null;
+      showLogin(true, "Logged out.");
+    }
+
+    // =========================
+    // File selection
+    // =========================
+    function openCamera() {
+      cameraInput.value = "";
+      cameraInput.click();
+    }
+
+    function openGallery() {
+      galleryInput.value = "";
+      galleryInput.click();
+    }
+
+    function handleFileSelect(file) {
+      if (!file) return;
+
+      selectedFile = file;
+      statusEl.textContent = "";
+      resultEl.innerHTML = "";
+
+      const objectUrl = URL.createObjectURL(file);
+      preview.src = objectUrl;
+      preview.style.display = "block";
+      previewHint.textContent = "Ready to analyze.";
+
+      const reader = new FileReader();
+      reader.onload = () => { selectedDataUrl = reader.result; };
+      reader.readAsDataURL(file);
+    }
+
+    cameraInput.addEventListener("change", () => handleFileSelect(cameraInput.files?.[0]));
+    galleryInput.addEventListener("change", () => handleFileSelect(galleryInput.files?.[0]));
+
+    // =========================
+    // Analyze
     // =========================
     async function analyze() {
       if (!selectedFile) {
         statusEl.innerHTML = `<span class="err">Select a photo first.</span>`;
         return;
       }
-      if (!selectedDataUrl) {
-        statusEl.innerHTML = `<span class="err">Please wait—image still loading.</span>`;
-        return;
-      }
 
       analyzeBtn.disabled = true;
-      statusEl.textContent = "Analyzing…";
+      statusEl.textContent = "Analyzing… (first scan may take ~30 seconds if server is waking up)";
       resultEl.innerHTML = "";
 
       const formData = new FormData();
       formData.append("file", selectedFile);
 
       try {
-        const res = await fetch("/analyze-image", {
-          method: "POST",
-          body: formData,
-          credentials: "include" // IMPORTANT for session cookie
-        });
+        const resp = await fetch("/analyze-image", { method: "POST", body: formData });
 
-        const text = await res.text();
-        const cleaned = stripCodeFences(text);
-        let data;
-        try { data = JSON.parse(cleaned); } catch { data = { error: "Could not parse JSON", raw: text }; }
-
-        if (!res.ok) {
-          const msg = (data && data.detail) ? data.detail : text;
-          throw new Error(`HTTP ${res.status}: ${msg}`);
+        if (!resp.ok) {
+          const err = await readJsonOrText(resp);
+          if (resp.status === 401) {
+            showLogin(true, "Login required");
+            throw new Error("Login required");
+          }
+          throw new Error(err?.detail || `Server error ${resp.status}`);
         }
 
-        if (data?.error) {
-          statusEl.innerHTML = `<span class="err">Error:</span> ${escapeHtml(data.error)}`;
-          renderResult(data);
-          return;
-        }
+        const data = await resp.json();
 
         statusEl.innerHTML = `<span class="ok">Done ✅</span>`;
         renderResult(data);
 
-        // Save to local device history
-        addLocal({ created_at: nowIso(), image_data_url: selectedDataUrl, result: data });
+        // Save to local history (device)
+        addToLocalHistory({
+          created_at: nowIso(),
+          image_data_url: selectedDataUrl,
+          result: data
+        });
 
-        // Refresh team history
+        // Refresh shared team history
         await refreshTeamHistory();
 
       } catch (e) {
-        // If not logged in, show login overlay
-        if (String(e.message).includes("401")) {
-          overlay.style.display = "flex";
-        }
+        console.error(e);
         statusEl.innerHTML = `<span class="err">Error:</span> ${escapeHtml(e.message)}`;
+        resultEl.innerHTML = "";
       } finally {
         analyzeBtn.disabled = false;
       }
@@ -531,9 +617,8 @@
     // =========================
     // Init
     // =========================
-    renderLocal();
-    setMode("login");
-    checkLogin();
+    renderLocalHistory();
+    ensureLoggedIn();
   </script>
 </body>
 </html>

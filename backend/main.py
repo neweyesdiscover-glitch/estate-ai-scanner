@@ -1,240 +1,346 @@
-# backend/main.py
-# ✅ Estate AI Scanner (Render-ready)
-# Phase 2: Company Login (cookie session) + Protect scanner routes
-# - /login (GET) shows simple login form
-# - /login (POST) sets session if company code/password match
-# - /logout clears session
-# - /scanner + /analyze-image require login
-# - Image analysis calls OpenAI and returns clean JSON
+"""
+backend/main.py
+✅ Estate AI Scanner — Render-ready FastAPI backend
+Features:
+- Serves frontend at /scanner
+- POST /analyze-image (protected by company login)
+- Company auth:
+    - POST /company/create
+    - POST /login
+    - POST /logout
+    - GET  /me
+- Shared team history (per company) stored in SQLite:
+    - GET  /team/history
+Notes:
+- Uses cookie-based sessions (SessionMiddleware) -> requires 'itsdangerous'
+- Uses OPENAI_API_KEY from env vars
+"""
 
 import os
 import json
 import base64
-from pathlib import Path
-from typing import Optional
+import sqlite3
+import hashlib
+from datetime import datetime
+from typing import Optional, Any, Dict, List
 
-from fastapi import FastAPI, UploadFile, File, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, FileResponse
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 
+from pydantic import BaseModel
+
+# If you are using OpenAI SDK:
+# pip install openai
 from openai import OpenAI
 
 
 # =========================
-# Config
+# App + Session
 # =========================
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-SECRET_KEY = os.getenv("SECRET_KEY", "")
 
-# Company login credentials (env overrides)
-COMPANY_CODE = os.getenv("COMPANY_CODE", "demo")
-COMPANY_PASSWORD = os.getenv("COMPANY_PASSWORD", "letmein123")
-
-FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
-INDEX_PATH = FRONTEND_DIR / "index.html"
-
-if not OPENAI_API_KEY:
-    # Render will still boot, but /analyze-image will fail with a helpful error.
-    print("⚠️ OPENAI_API_KEY not set")
-if not SECRET_KEY:
-    # If SECRET_KEY is missing, SessionMiddleware will be unsafe / broken.
-    print("❌ SECRET_KEY not set (add it in Render → Environment Variables)")
-
-
-# =========================
-# App
-# =========================
 app = FastAPI()
 
-# Cookie-based session (for login)
-# NOTE: Requires SECRET_KEY set in Render env vars
-app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY or "dev-only-change-me")
+# IMPORTANT: set this in Render env vars as SESSION_SECRET for production
+SESSION_SECRET = os.getenv("SESSION_SECRET", "dev-session-secret-change-me")
+app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, same_site="lax", https_only=True)
 
-# If you later host frontend separately, adjust CORS.
-# For now, same-domain is ideal.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # tighten later
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY".lower()) or os.getenv("OPENAI_API_KEY".upper()) or os.getenv("OPENAI_API_KEY")
+# You showed your Render variable is OPENAI_API_KEY — this reads it.
+if not OPENAI_API_KEY:
+    # Don't crash Render; just raise when calling /analyze-image
+    pass
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
 
 # =========================
-# Auth helpers
+# Paths
 # =========================
-def is_logged_in(request: Request) -> bool:
-    return bool(request.session.get("company_code"))
 
-def require_login(request: Request) -> Optional[RedirectResponse]:
-    if not is_logged_in(request):
-        return RedirectResponse(url="/login", status_code=302)
-    return None
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.abspath(os.path.join(BASE_DIR, ".."))
+FRONTEND_PATH = os.path.join(PROJECT_ROOT, "frontend", "index.html")
+DB_PATH = os.path.join(PROJECT_ROOT, "backend", "scans.db")
 
 
 # =========================
-# Simple pages
+# DB helpers
 # =========================
+
+def db_connect() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def db_init() -> None:
+    with db_connect() as conn:
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS companies (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            passcode_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """)
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS scans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_name TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            image_data_url TEXT,
+            result_json TEXT NOT NULL
+        )
+        """)
+        conn.commit()
+
+db_init()
+
+
+# =========================
+# Auth + hashing
+# =========================
+
+def _hash_passcode(company: str, passcode: str) -> str:
+    """
+    Simple salted hash. Good enough for MVP.
+    If you want stronger later: use passlib/bcrypt.
+    """
+    salt = os.getenv("PASSCODE_SALT", SESSION_SECRET)
+    raw = f"{salt}|{company.lower().strip()}|{passcode}".encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+def get_company_from_session(request: Request) -> Optional[str]:
+    return request.session.get("company")
+
+def require_company(request: Request) -> str:
+    company = get_company_from_session(request)
+    if not company:
+        raise HTTPException(status_code=401, detail="Login required")
+    return company
+
+
+# =========================
+# Models
+# =========================
+
+class CreateCompanyRequest(BaseModel):
+    company: str
+    passcode: str
+
+class LoginRequest(BaseModel):
+    company: str
+    passcode: str
+
+class AnalyzeSavePayload(BaseModel):
+    # optional client-provided thumbnail/data-url for team history
+    image_data_url: Optional[str] = None
+
+
+# =========================
+# Frontend serve
+# =========================
+
 @app.get("/", response_class=JSONResponse)
-def home():
-    return {"message": "Estate AI Scanner is LIVE 🚀", "login": "/login", "scanner": "/scanner"}
+def root():
+    return {"message": "Estate AI Scanner API is LIVE 🚀", "scanner": "/scanner"}
 
-@app.get("/login", response_class=HTMLResponse)
-def login_page(request: Request):
-    # If already logged in, go straight to scanner
-    if is_logged_in(request):
-        return RedirectResponse(url="/scanner", status_code=302)
+@app.get("/scanner", response_class=HTMLResponse)
+def scanner():
+    if not os.path.exists(FRONTEND_PATH):
+        return HTMLResponse(
+            content=json.dumps({"error": f"index.html not found in frontend folder. Expected {FRONTEND_PATH}"}),
+            status_code=500
+        )
+    with open(FRONTEND_PATH, "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
 
-    msg = request.query_params.get("msg", "")
-    safe_msg = (msg or "").replace("<", "&lt;").replace(">", "&gt;")
 
-    html = f"""
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Estate AI Scanner - Login</title>
-  <style>
-    body {{ font-family: Arial, sans-serif; max-width: 520px; margin: 40px auto; padding: 0 16px; }}
-    .card {{ border: 1px solid #ddd; border-radius: 12px; padding: 16px; }}
-    h1 {{ margin: 0 0 10px; }}
-    label {{ display:block; margin-top: 10px; font-weight: 700; }}
-    input {{ width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #ccc; }}
-    button {{ margin-top: 14px; padding: 10px 14px; border-radius: 8px; border: 1px solid #2b7cff; background:#2b7cff; color:#fff; font-weight: 800; cursor:pointer; }}
-    .sub {{ color:#555; margin: 0 0 8px; }}
-    .msg {{ color:#b00020; font-weight: 800; margin-top: 10px; }}
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>Company Login</h1>
-    <p class="sub">Enter your company access code to use the scanner.</p>
+# =========================
+# Company endpoints
+# =========================
 
-    <form method="post" action="/login">
-      <label>Company Code</label>
-      <input name="company_code" placeholder="e.g., demo" required />
+@app.get("/me")
+def me(request: Request):
+    """
+    Frontend uses this to know if a company session exists.
+    """
+    company = get_company_from_session(request)
+    return {"logged_in": bool(company), "company": company}
 
-      <label>Password</label>
-      <input name="password" type="password" placeholder="••••••••" required />
+@app.post("/company/create")
+def create_company(payload: CreateCompanyRequest):
+    company = payload.company.strip().lower()
+    passcode = payload.passcode.strip()
 
-      <button type="submit">Log In</button>
-    </form>
+    if not company or not passcode:
+        raise HTTPException(status_code=400, detail="Company and passcode are required")
 
-    {"<div class='msg'>" + safe_msg + "</div>" if safe_msg else ""}
-  </div>
-</body>
-</html>
-"""
-    return HTMLResponse(html)
+    pass_hash = _hash_passcode(company, passcode)
+    now = datetime.utcnow().isoformat()
+
+    try:
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO companies (name, passcode_hash, created_at) VALUES (?, ?, ?)",
+                (company, pass_hash, now)
+            )
+            conn.commit()
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=409, detail="Company already exists")
+
+    return {"success": True, "company": company}
 
 @app.post("/login")
-def login(company_code: str = Form(...), password: str = Form(...), request: Request = None):
-    # Basic check (we’ll replace with real user/company DB later)
-    if company_code.strip() == COMPANY_CODE and password == COMPANY_PASSWORD:
-        request.session["company_code"] = company_code.strip()
-        return RedirectResponse(url="/scanner", status_code=302)
+def login(request: Request, payload: LoginRequest):
+    """
+    ✅ Fixes your 422 by matching payload fields: {company, passcode}
+    """
+    company = payload.company.strip().lower()
+    passcode = payload.passcode.strip()
 
-    return RedirectResponse(url="/login?msg=Invalid+company+code+or+password", status_code=302)
+    if not company or not passcode:
+        raise HTTPException(status_code=400, detail="Company and passcode are required")
 
-@app.get("/logout")
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT passcode_hash FROM companies WHERE name = ?",
+            (company,)
+        ).fetchone()
+
+    if not row:
+        raise HTTPException(status_code=401, detail="Invalid login")
+
+    expected = row["passcode_hash"]
+    actual = _hash_passcode(company, passcode)
+    if actual != expected:
+        raise HTTPException(status_code=401, detail="Invalid login")
+
+    request.session["company"] = company
+    return {"success": True, "company": company}
+
+@app.post("/logout")
 def logout(request: Request):
     request.session.clear()
-    return RedirectResponse(url="/login?msg=Logged+out", status_code=302)
-
-@app.get("/scanner")
-def scanner(request: Request):
-    # Protect the scanner UI
-    gate = require_login(request)
-    if gate:
-        return gate
-
-    if not INDEX_PATH.exists():
-        return JSONResponse(
-            {"error": "index.html not found in frontend folder. Expected frontend/index.html"},
-            status_code=500,
-        )
-
-    # Serve your existing frontend scanner (camera + local history)
-    return FileResponse(str(INDEX_PATH), media_type="text/html")
+    return {"success": True}
 
 
 # =========================
-# OpenAI result cleanup (strip ```json fences)
+# Team history (shared)
 # =========================
+
+@app.get("/team/history")
+def team_history(request: Request, limit: int = 25):
+    company = require_company(request)
+    limit = max(1, min(limit, 100))
+
+    with db_connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT created_at, image_data_url, result_json
+            FROM scans
+            WHERE company_name = ?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (company, limit)
+        ).fetchall()
+
+    items = []
+    for r in rows:
+        try:
+            result = json.loads(r["result_json"])
+        except Exception:
+            result = {"error": "Bad JSON in DB"}
+        items.append({
+            "created_at": r["created_at"],
+            "image_data_url": r["image_data_url"],
+            "result": result
+        })
+
+    return {"company": company, "items": items}
+
+
+# =========================
+# AI analyze helpers
+# =========================
+
 def _clean_json_text(s: str) -> str:
-    """Remove ```json fences if present and trim whitespace."""
+    """Remove ```json fences and trim."""
     if not s:
         return ""
     s = s.strip()
-    s = s.replace("```json", "").replace("```JSON", "")
-    s = s.replace("```", "").strip()
+    s = s.replace("```json", "").replace("```JSON", "").replace("```", "").strip()
     return s
+
+def _build_prompt() -> str:
+    return (
+        "You are an expert at identifying items from photos and estimating resale value.\n"
+        "Return ONLY valid JSON (no markdown).\n\n"
+        "JSON keys:\n"
+        "- item_name (string)\n"
+        "- brand_or_origin (string)\n"
+        "- estimated_value_range (string, e.g. \"$20 - $50\")\n"
+        "- suggested_listing_price (string, e.g. \"$35\")\n"
+        "- condition_assumptions (string)\n"
+        "- keywords_for_listing (string or array)\n"
+        "- pricing_sources (string or array)\n\n"
+        "Be concise and practical for resale/estate sale use.\n"
+    )
+
+def _save_scan(company: str, image_data_url: Optional[str], result_obj: Dict[str, Any]) -> None:
+    now = datetime.utcnow().isoformat()
+    with db_connect() as conn:
+        conn.execute(
+            "INSERT INTO scans (company_name, created_at, image_data_url, result_json) VALUES (?, ?, ?, ?)",
+            (company, now, image_data_url, json.dumps(result_obj))
+        )
+        conn.commit()
 
 
 # =========================
 # Analyze endpoint (protected)
 # =========================
+
 @app.post("/analyze-image")
 async def analyze_image(request: Request, file: UploadFile = File(...)):
-    # Protect scanning
-    gate = require_login(request)
-    if gate:
-        return gate
+    company = require_company(request)
 
-    if not OPENAI_API_KEY:
-        return JSONResponse({"error": "OPENAI_API_KEY is not set on the server."}, status_code=500)
+    if not client:
+        raise HTTPException(status_code=500, detail="OPENAI_API_KEY is not set on server")
 
     contents = await file.read()
     if not contents:
-        return JSONResponse({"error": "Empty file upload."}, status_code=400)
+        raise HTTPException(status_code=400, detail="Empty file")
 
     base64_image = base64.b64encode(contents).decode("utf-8")
 
-    # Prompt: force JSON output
-    system = (
-        "You are an expert reseller and estate-sale pricer. "
-        "Return ONLY valid JSON with these exact keys:\n"
-        "item_name, brand_or_origin, estimated_value_range, suggested_listing_price, "
-        "condition_assumptions, keywords_for_listing, pricing_sources\n"
-        "No markdown. No code fences."
+    # NOTE: this uses a vision-capable model. If you change model names, keep it consistent.
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": _build_prompt()},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Identify this item and estimate resale value."},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                ],
+            },
+        ],
+        max_tokens=500,
     )
 
-    user = (
-        "Analyze this item photo and estimate resale value. "
-        "Use common online resale context (eBay/Etsy/etc) and be concise."
-    )
+    raw = response.choices[0].message.content or ""
+    cleaned = _clean_json_text(raw)
 
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system},
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": user},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}},
-                    ],
-                },
-            ],
-            max_tokens=350,
-        )
+        data = json.loads(cleaned)
+    except Exception:
+        data = {"error": "Model did not return valid JSON", "raw": raw}
 
-        raw = response.choices[0].message.content or ""
-        cleaned = _clean_json_text(raw)
+    # Optional: if frontend sends a thumbnail/data-url, it can be saved later.
+    # We'll save scan without thumbnail by default; frontend can re-save with thumb via /team/save-thumb
+    _save_scan(company=company, image_data_url=None, result_obj=data)
 
-        # Return parsed JSON if possible
-        try:
-            data = json.loads(cleaned)
-            return JSONResponse(data)
-        except Exception:
-            # If model returns non-JSON, return a useful error payload
-            return JSONResponse({"error": "Model did not return valid JSON", "raw": raw}, status_code=200)
-
-    except Exception as e:
-        return JSONResponse({"error": f"Server exception: {str(e)}"}, status_code=500)
+    return JSONResponse(content=data)
