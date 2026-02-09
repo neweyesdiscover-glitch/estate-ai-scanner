@@ -1,8 +1,5 @@
 <!-- frontend/index.html
-     ✅ Estate AI Scanner — Camera + Gallery + Local History (localStorage)
-     - Works on phones: "Use Camera" opens rear camera
-     - Saves last scans (image + results) in the browser (per device)
-     - Click a past scan to re-open it (no re-scan needed)
+     ✅ Company login + camera + gallery + local history + shared TEAM history
 -->
 
 <!doctype html>
@@ -43,8 +40,8 @@
     .resultLine { margin: 6px 0; line-height: 1.25; }
     .label { font-weight: 800; }
 
-    .historyList { display: flex; flex-direction: column; gap: 10px; }
-    .historyItem {
+    .list { display: flex; flex-direction: column; gap: 10px; }
+    .itemRow {
       display: grid;
       grid-template-columns: 72px 1fr;
       gap: 10px;
@@ -54,31 +51,44 @@
       padding: 8px;
       cursor: pointer;
     }
-    .historyItem:hover { background: #fafafa; }
+    .itemRow:hover { background: #fafafa; }
     .thumb { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; border: 1px solid #eee; }
-    .historyMeta { font-size: 13px; color: #444; }
-    .historyMeta .title { font-weight: 800; color: #111; margin-bottom: 2px; }
-    .historyMeta .time { color: #666; font-size: 12px; }
-
-    pre {
-      white-space: pre-wrap;
-      word-break: break-word;
-      background: #f7f7f7;
-      border: 1px solid #eee;
-      padding: 10px;
-      border-radius: 10px;
-      margin: 10px 0 0;
-    }
+    .meta { font-size: 13px; color: #444; }
+    .meta .title { font-weight: 800; color: #111; margin-bottom: 2px; }
+    .meta .time { color: #666; font-size: 12px; }
 
     .small { font-size: 12px; color: #666; margin-top: 10px; }
+
+    /* Login overlay */
+    .overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+      display: none; align-items: center; justify-content: center; padding: 20px;
+    }
+    .modal {
+      width: 100%; max-width: 420px; background: #fff; border-radius: 14px; padding: 16px; border: 1px solid #ddd;
+    }
+    .modal h2 { margin: 0 0 8px; }
+    .row { display: grid; gap: 8px; margin-top: 10px; }
+    input {
+      padding: 10px; border-radius: 10px; border: 1px solid #ccc; font-size: 14px; width: 100%;
+    }
+    .tabs { display: flex; gap: 8px; margin-top: 8px; }
+    .tab { padding: 8px 10px; border-radius: 10px; border: 1px solid #ddd; cursor: pointer; }
+    .tab.active { background: #2b7cff; border-color: #2b7cff; color: #fff; font-weight: 700; }
   </style>
 </head>
 
 <body>
   <h1>Estate AI Scanner</h1>
-  <p class="sub">Snap a photo, identify the item, and get a resale estimate. (History is saved on this device.)</p>
+  <p class="sub">Company login required. Snap a photo, identify the item, and get an estimate.</p>
 
-  <!-- Hidden inputs: Camera + Gallery -->
+  <!-- Login status -->
+  <div class="controls">
+    <div id="whoami" class="status" style="flex:1;"></div>
+    <button id="logoutBtn" onclick="logout()" style="display:none;">Logout</button>
+  </div>
+
+  <!-- Hidden inputs -->
   <input id="cameraInput" type="file" accept="image/*" capture="environment" style="display:none" />
   <input id="galleryInput" type="file" accept="image/*" style="display:none" />
 
@@ -86,7 +96,8 @@
     <button onclick="openCamera()">Use Camera</button>
     <button onclick="openGallery()">Choose From Photos</button>
     <button id="analyzeBtn" class="primary" onclick="analyze()">Analyze</button>
-    <button onclick="clearHistory()">Clear History</button>
+    <button onclick="refreshTeamHistory()">Refresh Team History</button>
+    <button onclick="clearLocalHistory()">Clear Local History</button>
   </div>
 
   <div class="grid">
@@ -94,10 +105,7 @@
       <h3>Preview</h3>
       <img id="preview" alt="Preview" />
       <div id="previewHint" class="status">Select a photo to begin.</div>
-
-      <div class="small">
-        Tip: On phones, “Use Camera” should open the rear camera automatically.
-      </div>
+      <div class="small">Tip: On phones, “Use Camera” opens the rear camera.</div>
     </div>
 
     <div class="card">
@@ -106,10 +114,36 @@
       <div id="result"></div>
     </div>
 
-    <div class="card" style="grid-column: 1 / -1;">
-      <h3>Recent Scans</h3>
-      <div id="history" class="historyList"></div>
-      <div id="historyEmpty" class="status">No scans saved yet.</div>
+    <div class="card">
+      <h3>Team History (shared)</h3>
+      <div id="teamHistory" class="list"></div>
+      <div id="teamEmpty" class="status">No team scans yet.</div>
+    </div>
+
+    <div class="card">
+      <h3>Local History (this device)</h3>
+      <div id="localHistory" class="list"></div>
+      <div id="localEmpty" class="status">No local scans yet.</div>
+    </div>
+  </div>
+
+  <!-- Login overlay -->
+  <div id="overlay" class="overlay">
+    <div class="modal">
+      <h2>Company Login</h2>
+      <div class="status" style="margin:0;">Use your company name + passcode.</div>
+
+      <div class="tabs">
+        <div id="tabLogin" class="tab active" onclick="setMode('login')">Login</div>
+        <div id="tabSignup" class="tab" onclick="setMode('signup')">Create Company</div>
+      </div>
+
+      <div class="row">
+        <input id="companyName" placeholder="Company name (e.g., Smith Estate Sales)" />
+        <input id="passcode" placeholder="Passcode (share with your staff)" type="password" />
+        <button class="primary" onclick="submitAuth()" id="authBtn">Login</button>
+        <div id="authStatus" class="status"></div>
+      </div>
     </div>
   </div>
 
@@ -124,77 +158,176 @@
     const statusEl = document.getElementById("status");
     const resultEl = document.getElementById("result");
     const analyzeBtn = document.getElementById("analyzeBtn");
-    const historyEl = document.getElementById("history");
-    const historyEmptyEl = document.getElementById("historyEmpty");
+
+    const whoamiEl = document.getElementById("whoami");
+    const logoutBtn = document.getElementById("logoutBtn");
+
+    const overlay = document.getElementById("overlay");
+    const authStatus = document.getElementById("authStatus");
+    const companyName = document.getElementById("companyName");
+    const passcode = document.getElementById("passcode");
+    const authBtn = document.getElementById("authBtn");
+    const tabLogin = document.getElementById("tabLogin");
+    const tabSignup = document.getElementById("tabSignup");
+
+    const teamHistoryEl = document.getElementById("teamHistory");
+    const teamEmptyEl = document.getElementById("teamEmpty");
+    const localHistoryEl = document.getElementById("localHistory");
+    const localEmptyEl = document.getElementById("localEmpty");
 
     // =========================
-    // Local state
+    // State
     // =========================
+    let authMode = "login"; // or "signup"
     let selectedFile = null;
-    let selectedDataUrl = null; // for history saves
-    const HISTORY_KEY = "estate_ai_history_v1";
-    const HISTORY_LIMIT = 25;
+    let selectedDataUrl = null;
+    let lastObjectUrl = null;
+
+    const LOCAL_KEY = "estate_ai_local_history_v2";
+    const LOCAL_LIMIT = 25;
 
     // =========================
     // Helpers
     // =========================
     function escapeHtml(str) {
       return String(str ?? "")
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
+        .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;").replaceAll("'", "&#039;");
+    }
+    function stripCodeFences(s) { return String(s ?? "").replace(/```json|```/gi, "").trim(); }
+    function nowIso() { return new Date().toISOString(); }
+    function formatTime(iso) { try { return new Date(iso).toLocaleString(); } catch { return iso; } }
+
+    async function api(path, options = {}) {
+      // IMPORTANT: include cookies for session login
+      const res = await fetch(path, { credentials: "include", ...options });
+      const text = await res.text();
+      let data = null;
+      try { data = JSON.parse(stripCodeFences(text)); } catch { data = text; }
+      if (!res.ok) {
+        const msg = (data && data.detail) ? data.detail : text;
+        throw new Error(`HTTP ${res.status}: ${msg}`);
+      }
+      return data;
     }
 
-    function stripCodeFences(s) {
-      return String(s ?? "").replace(/```json|```/gi, "").trim();
-    }
-
-    function nowIso() {
-      return new Date().toISOString();
-    }
-
-    function formatTime(iso) {
-      try {
-        const d = new Date(iso);
-        return d.toLocaleString();
-      } catch {
-        return iso;
+    // =========================
+    // Auth UI
+    // =========================
+    function setMode(mode) {
+      authMode = mode;
+      authStatus.textContent = "";
+      if (mode === "login") {
+        tabLogin.classList.add("active"); tabSignup.classList.remove("active");
+        authBtn.textContent = "Login";
+      } else {
+        tabSignup.classList.add("active"); tabLogin.classList.remove("active");
+        authBtn.textContent = "Create Company";
       }
     }
 
-    function readHistory() {
+    async function checkLogin() {
       try {
-        const raw = localStorage.getItem(HISTORY_KEY);
-        return raw ? JSON.parse(raw) : [];
-      } catch {
-        return [];
+        const me = await api("/me");
+        if (me.logged_in) {
+          overlay.style.display = "none";
+          whoamiEl.innerHTML = `<span class="ok">Logged in:</span> ${escapeHtml(me.company.name)}`;
+          logoutBtn.style.display = "inline-block";
+          await refreshTeamHistory();
+        } else {
+          overlay.style.display = "flex";
+          whoamiEl.textContent = "Not logged in";
+          logoutBtn.style.display = "none";
+        }
+      } catch (e) {
+        overlay.style.display = "flex";
+        whoamiEl.innerHTML = `<span class="err">Login required</span>`;
       }
     }
 
-    function writeHistory(items) {
-      localStorage.setItem(HISTORY_KEY, JSON.stringify(items));
+    async function submitAuth() {
+      authStatus.textContent = "Working…";
+      try {
+        const payload = {
+          name: companyName.value.trim(),
+          passcode: passcode.value.trim()
+        };
+        if (!payload.name || !payload.passcode) {
+          authStatus.innerHTML = `<span class="err">Enter company name + passcode.</span>`;
+          return;
+        }
+
+        if (authMode === "signup") {
+          await api("/signup-company", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+        } else {
+          await api("/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+        }
+
+        authStatus.innerHTML = `<span class="ok">Success ✅</span>`;
+        await checkLogin();
+      } catch (e) {
+        authStatus.innerHTML = `<span class="err">${escapeHtml(e.message)}</span>`;
+      }
     }
 
-    function addToHistory(entry) {
-      const items = readHistory();
-      items.unshift(entry);
-      // de-dupe by timestamp+filename-ish (optional)
-      const trimmed = items.slice(0, HISTORY_LIMIT);
-      writeHistory(trimmed);
-      renderHistory();
+    async function logout() {
+      try { await api("/logout", { method: "POST" }); } catch {}
+      overlay.style.display = "flex";
+      whoamiEl.textContent = "Not logged in";
+      logoutBtn.style.display = "none";
     }
 
-    function clearHistory() {
-      localStorage.removeItem(HISTORY_KEY);
-      renderHistory();
+    // =========================
+    // File selection
+    // =========================
+    function openCamera() { cameraInput.value = ""; cameraInput.click(); }
+    function openGallery() { galleryInput.value = ""; galleryInput.click(); }
+
+    function handleFileSelect(file) {
+      if (!file) return;
+
+      selectedFile = file;
+      selectedDataUrl = null;
+
       statusEl.textContent = "";
       resultEl.innerHTML = "";
+
+      analyzeBtn.disabled = true;
+      previewHint.textContent = "Loading image…";
+
+      if (lastObjectUrl) URL.revokeObjectURL(lastObjectUrl);
+      lastObjectUrl = URL.createObjectURL(file);
+      preview.src = lastObjectUrl;
+      preview.style.display = "block";
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        selectedDataUrl = reader.result;
+        previewHint.textContent = "Ready to analyze.";
+        analyzeBtn.disabled = false;
+      };
+      reader.onerror = () => {
+        previewHint.textContent = "Could not read image.";
+        analyzeBtn.disabled = false;
+      };
+      reader.readAsDataURL(file);
     }
 
+    cameraInput.addEventListener("change", () => handleFileSelect(cameraInput.files?.[0]));
+    galleryInput.addEventListener("change", () => handleFileSelect(galleryInput.files?.[0]));
+
+    // =========================
+    // Result rendering
+    // =========================
     function renderResult(data) {
-      // data is the parsed JSON returned by backend (or {error, raw})
       if (!data || typeof data !== "object") {
         resultEl.innerHTML = `<pre>${escapeHtml(String(data))}</pre>`;
         return;
@@ -206,7 +339,6 @@
         return;
       }
 
-      // Accept either array/string for keywords/sources
       const kw = Array.isArray(data.keywords_for_listing)
         ? data.keywords_for_listing.join(", ")
         : (data.keywords_for_listing ?? "");
@@ -227,154 +359,170 @@
         ${sources.length ? `
           <div class="resultLine" style="margin-top:10px;">
             <span class="label">Pricing Sources:</span>
-            <ul>
-              ${sources.map(s => `<li>${escapeHtml(s)}</li>`).join("")}
-            </ul>
+            <ul>${sources.map(s => `<li>${escapeHtml(s)}</li>`).join("")}</ul>
           </div>
         ` : ""}
       `;
     }
 
-    function renderHistory() {
-      const items = readHistory();
-      historyEl.innerHTML = "";
+    // =========================
+    // Local history (device)
+    // =========================
+    function readLocal() {
+      try { return JSON.parse(localStorage.getItem(LOCAL_KEY) || "[]"); } catch { return []; }
+    }
+    function writeLocal(items) {
+      localStorage.setItem(LOCAL_KEY, JSON.stringify(items));
+    }
+    function addLocal(entry) {
+      const items = readLocal();
+      items.unshift(entry);
+      writeLocal(items.slice(0, LOCAL_LIMIT));
+      renderLocal();
+    }
+    function clearLocalHistory() {
+      localStorage.removeItem(LOCAL_KEY);
+      renderLocal();
+    }
+    function renderLocal() {
+      const items = readLocal();
+      localHistoryEl.innerHTML = "";
+      if (!items.length) { localEmptyEl.style.display = "block"; return; }
+      localEmptyEl.style.display = "none";
 
-      if (!items.length) {
-        historyEmptyEl.style.display = "block";
-        return;
-      }
-
-      historyEmptyEl.style.display = "none";
-
-      items.forEach((item, idx) => {
+      items.forEach((item) => {
         const title = item?.result?.item_name || "Unknown item";
         const time = item?.created_at ? formatTime(item.created_at) : "";
-        const price = item?.result?.suggested_listing_price || "";
         const range = item?.result?.estimated_value_range || "";
+        const price = item?.result?.suggested_listing_price || "";
 
         const div = document.createElement("div");
-        div.className = "historyItem";
-        div.onclick = () => openHistoryItem(idx);
+        div.className = "itemRow";
+        div.onclick = () => {
+          selectedFile = null;
+          selectedDataUrl = item.image_data_url || null;
+          if (selectedDataUrl) { preview.src = selectedDataUrl; preview.style.display = "block"; }
+          statusEl.innerHTML = `<span class="ok">Loaded ✅</span>`;
+          renderResult(item.result);
+        };
 
         div.innerHTML = `
           <img class="thumb" src="${escapeHtml(item.image_data_url || "")}" alt="thumb" />
-          <div class="historyMeta">
+          <div class="meta">
             <div class="title">${escapeHtml(title)}</div>
             <div>${escapeHtml(range)} ${price ? " • " + escapeHtml(price) : ""}</div>
             <div class="time">${escapeHtml(time)}</div>
           </div>
         `;
-
-        historyEl.appendChild(div);
+        localHistoryEl.appendChild(div);
       });
     }
 
-    function openHistoryItem(index) {
-      const items = readHistory();
-      const item = items[index];
-      if (!item) return;
+    // =========================
+    // Team history (server)
+    // =========================
+    async function refreshTeamHistory() {
+      try {
+        const payload = await api("/history?limit=50");
+        const items = payload.items || [];
 
-      // Load preview
-      selectedFile = null; // this history item is already scanned
-      selectedDataUrl = item.image_data_url || null;
+        teamHistoryEl.innerHTML = "";
+        if (!items.length) { teamEmptyEl.style.display = "block"; return; }
+        teamEmptyEl.style.display = "none";
 
-      if (selectedDataUrl) {
-        preview.src = selectedDataUrl;
-        preview.style.display = "block";
-        previewHint.textContent = "Loaded from history.";
+        items.forEach((item) => {
+          const title = item?.result?.item_name || "Unknown item";
+          const time = item?.created_at ? formatTime(item.created_at) : "";
+          const range = item?.result?.estimated_value_range || "";
+          const price = item?.result?.suggested_listing_price || "";
+          const img = item.image_url;
+
+          const div = document.createElement("div");
+          div.className = "itemRow";
+          div.onclick = () => {
+            // Load server image
+            preview.src = img;
+            preview.style.display = "block";
+            previewHint.textContent = "Loaded from team history.";
+            statusEl.innerHTML = `<span class="ok">Loaded ✅</span>`;
+            renderResult(item.result);
+          };
+
+          div.innerHTML = `
+            <img class="thumb" src="${escapeHtml(img)}" alt="thumb" />
+            <div class="meta">
+              <div class="title">${escapeHtml(title)}</div>
+              <div>${escapeHtml(range)} ${price ? " • " + escapeHtml(price) : ""}</div>
+              <div class="time">${escapeHtml(time)}</div>
+            </div>
+          `;
+          teamHistoryEl.appendChild(div);
+        });
+
+      } catch (e) {
+        teamEmptyEl.style.display = "block";
+        teamEmptyEl.innerHTML = `<span class="err">Team history unavailable:</span> ${escapeHtml(e.message)}`;
       }
-
-      // Show result
-      statusEl.innerHTML = `<span class="ok">Loaded ✅</span>`;
-      renderResult(item.result);
     }
 
     // =========================
-    // File selection
-    // =========================
-    function openCamera() {
-      cameraInput.value = "";
-      cameraInput.click();
-    }
-
-    function openGallery() {
-      galleryInput.value = "";
-      galleryInput.click();
-    }
-
-    function handleFileSelect(file) {
-      if (!file) return;
-
-      selectedFile = file;
-      statusEl.textContent = "";
-      resultEl.innerHTML = "";
-
-      // Build preview and a base64 data URL for history saving
-      const objectUrl = URL.createObjectURL(file);
-      preview.src = objectUrl;
-      preview.style.display = "block";
-      previewHint.textContent = "Ready to analyze.";
-
-      // Read as base64 data url (for history storage)
-      const reader = new FileReader();
-      reader.onload = () => {
-        selectedDataUrl = reader.result; // "data:image/...;base64,..."
-      };
-      reader.readAsDataURL(file);
-    }
-
-    cameraInput.addEventListener("change", () => handleFileSelect(cameraInput.files?.[0]));
-    galleryInput.addEventListener("change", () => handleFileSelect(galleryInput.files?.[0]));
-
-    // =========================
-    // Analyze
+    // Analyze (requires login)
     // =========================
     async function analyze() {
       if (!selectedFile) {
         statusEl.innerHTML = `<span class="err">Select a photo first.</span>`;
         return;
       }
+      if (!selectedDataUrl) {
+        statusEl.innerHTML = `<span class="err">Please wait—image still loading.</span>`;
+        return;
+      }
 
       analyzeBtn.disabled = true;
-      statusEl.textContent = "Analyzing… (first scan may take ~30 seconds if server is waking up)";
+      statusEl.textContent = "Analyzing…";
       resultEl.innerHTML = "";
 
       const formData = new FormData();
       formData.append("file", selectedFile);
 
       try {
-        // ✅ Relative path — works when served from same domain (/scanner on Render)
-        const response = await fetch("/analyze-image", { method: "POST", body: formData });
-        const text = await response.text();
+        const res = await fetch("/analyze-image", {
+          method: "POST",
+          body: formData,
+          credentials: "include" // IMPORTANT for session cookie
+        });
 
-        if (!response.ok) {
-          throw new Error(`Server error ${response.status}: ${text}`);
-        }
-
-        // Backend returns JSON; safely parse
+        const text = await res.text();
         const cleaned = stripCodeFences(text);
         let data;
-        try {
-          data = JSON.parse(cleaned);
-        } catch {
-          // If backend returns plain JSON already, cleaned should parse; otherwise show text
-          data = { error: "Could not parse JSON from server", raw: text };
+        try { data = JSON.parse(cleaned); } catch { data = { error: "Could not parse JSON", raw: text }; }
+
+        if (!res.ok) {
+          const msg = (data && data.detail) ? data.detail : text;
+          throw new Error(`HTTP ${res.status}: ${msg}`);
+        }
+
+        if (data?.error) {
+          statusEl.innerHTML = `<span class="err">Error:</span> ${escapeHtml(data.error)}`;
+          renderResult(data);
+          return;
         }
 
         statusEl.innerHTML = `<span class="ok">Done ✅</span>`;
         renderResult(data);
 
-        // Save to local history (image + result)
-        addToHistory({
-          created_at: nowIso(),
-          image_data_url: selectedDataUrl, // base64 image for the thumbnail + reload
-          result: data
-        });
+        // Save to local device history
+        addLocal({ created_at: nowIso(), image_data_url: selectedDataUrl, result: data });
 
-      } catch (err) {
-        console.error(err);
-        statusEl.innerHTML = `<span class="err">Connection error.</span> ${escapeHtml(err.message)}`;
-        resultEl.innerHTML = "";
+        // Refresh team history
+        await refreshTeamHistory();
+
+      } catch (e) {
+        // If not logged in, show login overlay
+        if (String(e.message).includes("401")) {
+          overlay.style.display = "flex";
+        }
+        statusEl.innerHTML = `<span class="err">Error:</span> ${escapeHtml(e.message)}`;
       } finally {
         analyzeBtn.disabled = false;
       }
@@ -383,7 +531,9 @@
     // =========================
     // Init
     // =========================
-    renderHistory();
+    renderLocal();
+    setMode("login");
+    checkLogin();
   </script>
 </body>
 </html>
