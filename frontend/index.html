@@ -54,8 +54,11 @@
       border-radius: 10px;
       padding: 8px;
       cursor: pointer;
+      transition: transform 0.05s ease;
     }
     .historyItem:hover { background: #fafafa; }
+    .historyItem:active { transform: scale(0.99); }
+
     .thumb {
       width: 72px; height: 72px;
       object-fit: cover;
@@ -63,6 +66,8 @@
       border: 1px solid #eee;
       display: block;
       background: #f7f7f7;
+      /* Tap-proofing: thumbnail should not intercept taps */
+      pointer-events: none;
     }
     .thumbPlaceholder {
       width: 72px; height: 72px;
@@ -75,10 +80,31 @@
       color: #777;
       font-size: 12px;
       user-select: none;
+      pointer-events: none;
     }
+
     .historyMeta { font-size: 13px; color: #444; }
     .historyMeta .title { font-weight: 800; color: #111; margin-bottom: 2px; }
     .historyMeta .time { color: #666; font-size: 12px; }
+
+    /* Tiny UX label in Team History cards */
+    .badge {
+      display: inline-block;
+      font-size: 11px;
+      color: #2b7cff;
+      background: rgba(43, 124, 255, 0.10);
+      border: 1px solid rgba(43, 124, 255, 0.25);
+      padding: 2px 6px;
+      border-radius: 999px;
+      margin-top: 6px;
+    }
+
+    /* Visual selection highlight */
+    .historyItem.selected {
+      border-color: #2b7cff;
+      box-shadow: 0 0 0 2px rgba(43, 124, 255, 0.18);
+      background: #f4f8ff;
+    }
 
     pre {
       white-space: pre-wrap;
@@ -257,7 +283,7 @@
         return;
       }
 
-      // Supports your older schema (item_name...) AND the newer schema (title...)
+      // Supports older schema (item_name...) AND newer schema (title...)
       const itemName = data.item_name ?? data.title ?? "Unknown item";
       const brand = data.brand_or_origin ?? data.brand ?? data.category ?? "";
       const range = data.estimated_value_range ?? (
@@ -350,10 +376,11 @@
 
       statusEl.innerHTML = `<span class="ok">Loaded ✅</span>`;
       renderResult(item.result);
+      resultEl.scrollIntoView({ behavior: "smooth", block: "start" });
     }
 
     // =========================
-    // Team History (shared)
+    // Team History (shared) — tap-proof + selection highlight + scroll
     // =========================
     function renderTeamHistory(items) {
       teamHistoryEl.innerHTML = "";
@@ -367,16 +394,39 @@
         const r = item?.result || {};
         const title = r?.item_name ?? r?.title ?? item?.title ?? "Unknown item";
         const time = item?.created_at ? formatTime(item.created_at) : "";
-        const price = r?.suggested_listing_price ?? (r?.suggested_list_price != null ? `$${r.suggested_list_price}` : "");
-        const range = r?.estimated_value_range ?? (
-          (r?.price_range_low != null && r?.price_range_high != null) ? `$${r.price_range_low}–$${r.price_range_high}` : ""
-        );
+        const price =
+          r?.suggested_listing_price ??
+          (r?.suggested_list_price != null ? `$${r.suggested_list_price}` : "");
+        const range =
+          r?.estimated_value_range ??
+          ((r?.price_range_low != null && r?.price_range_high != null)
+            ? `$${r.price_range_low}–$${r.price_range_high}`
+            : "");
 
         const imgSrc = item.image_url || "";
 
         const div = document.createElement("div");
         div.className = "historyItem";
-        div.onclick = () => {
+
+        div.innerHTML = `
+          ${imgSrc
+            ? `<img class="thumb" src="${escapeHtml(imgSrc)}" alt="thumb" />`
+            : `<div class="thumbPlaceholder">No image</div>`
+          }
+          <div class="historyMeta">
+            <div class="title">${escapeHtml(title)}</div>
+            <div>${escapeHtml(range)} ${price ? " • " + escapeHtml(price) : ""}</div>
+            <div class="time">${escapeHtml(time)}</div>
+            <div class="badge">Shared with your team</div>
+          </div>
+        `;
+
+        const onSelect = () => {
+          // Clear selection highlight
+          teamHistoryEl.querySelectorAll(".historyItem.selected").forEach(el => el.classList.remove("selected"));
+          div.classList.add("selected");
+
+          // Preview
           selectedFile = null;
           selectedDataUrl = imgSrc || null;
 
@@ -386,21 +436,24 @@
             previewHint.textContent = "Loaded from team history.";
           } else {
             preview.style.display = "none";
-            previewHint.textContent = "Loaded from team history.";
+            previewHint.textContent = "Loaded from team history (no image available).";
           }
 
-          statusEl.innerHTML = `<span class="ok">Loaded ✅</span>`;
+          // Result + status
+          statusEl.innerHTML = `<span class="ok">Loaded ✅</span> Loaded from team history.`;
           renderResult(item.result);
+
+          // Make the update visible on mobile
+          resultEl.scrollIntoView({ behavior: "smooth", block: "start" });
         };
 
-        div.innerHTML = `
-          <img class="thumb" src="${escapeHtml(imgSrc)}" alt="thumb" />
-          <div class="historyMeta">
-            <div class="title">${escapeHtml(title)}</div>
-            <div>${escapeHtml(range)} ${price ? " • " + escapeHtml(price) : ""}</div>
-            <div class="time">${escapeHtml(time)}</div>
-          </div>
-        `;
+        // Tap-proof handlers
+        div.addEventListener("click", onSelect);
+        div.addEventListener("touchend", (e) => {
+          e.preventDefault();
+          onSelect();
+        }, { passive: false });
+
         teamHistoryEl.appendChild(div);
       });
     }
@@ -516,6 +569,7 @@
         }
 
         await refreshTeamHistory();
+        resultEl.scrollIntoView({ behavior: "smooth", block: "start" });
 
       } catch (e) {
         console.error(e);
