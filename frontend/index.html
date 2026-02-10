@@ -1,9 +1,9 @@
 <!-- frontend/index.html
-     ✅ Estate AI Scanner — Company Login + Camera + Local History + Shared Team History
-     - Login required (company + passcode)
+     ✅ Estate AI Scanner — Camera + Local History + Shared Team History
+     - NO login logic in frontend (backend handles /login redirect)
      - "Use Camera" opens rear camera on phones
      - Local History saved per device (localStorage)
-     - Team History shared across same company (server DB)
+     - Team History pulled from server (shared)
 -->
 
 <!doctype html>
@@ -72,57 +72,12 @@
     }
 
     .small { font-size: 12px; color: #666; margin-top: 10px; }
-
-    /* =========================
-       Login modal
-       ========================= */
-    .overlay {
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.35);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      padding: 18px;
-      z-index: 999;
-    }
-    .modal {
-      width: 520px;
-      max-width: 100%;
-      background: white;
-      border-radius: 14px;
-      border: 1px solid #ddd;
-      box-shadow: 0 12px 35px rgba(0,0,0,0.25);
-      padding: 16px;
-    }
-    .modal h2 { margin: 0 0 4px; }
-    .tabs { display: flex; gap: 10px; margin: 10px 0 14px; }
-    .tab {
-      padding: 8px 10px;
-      border-radius: 10px;
-      border: 1px solid #ddd;
-      cursor: pointer;
-      background: #fafafa;
-      font-weight: 700;
-    }
-    .tab.active { background: #2b7cff; color: #fff; border-color: #2b7cff; }
-    .field { margin: 10px 0; }
-    .field input {
-      width: 100%;
-      padding: 10px;
-      border-radius: 10px;
-      border: 1px solid #ddd;
-      font-size: 14px;
-    }
-    .modalActions { margin-top: 12px; display: flex; gap: 10px; }
-    .modalMsg { margin-top: 8px; font-size: 13px; color: #b00020; }
-    .whoami { margin: 8px 0 0; font-size: 13px; color: #555; }
   </style>
 </head>
 
 <body>
   <h1>Estate AI Scanner</h1>
-  <p class="sub" id="subtitle">Company login required. Snap a photo, identify the item, and get an estimate.</p>
+  <p class="sub" id="subtitle">Snap a photo, identify the item, and get an estimate.</p>
 
   <!-- Hidden inputs: Camera + Gallery -->
   <input id="cameraInput" type="file" accept="image/*" capture="environment" style="display:none" />
@@ -135,7 +90,6 @@
 
     <button onclick="refreshTeamHistory()">Refresh Team History</button>
     <button onclick="clearLocalHistory()">Clear Local History</button>
-    <button onclick="logout()" style="margin-left:auto;">Logout</button>
   </div>
 
   <div class="grid">
@@ -168,8 +122,6 @@
     </div>
   </div>
 
-
-
   <script>
     // =========================
     // Elements
@@ -188,23 +140,12 @@
     const teamHistoryEl = document.getElementById("teamHistory");
     const teamEmptyEl = document.getElementById("teamEmpty");
 
-    const overlay = document.getElementById("overlay");
-    const tabLogin = document.getElementById("tabLogin");
-    const tabCreate = document.getElementById("tabCreate");
-    const authBtn = document.getElementById("authBtn");
-    const authMsg = document.getElementById("authMsg");
-    const whoami = document.getElementById("whoami");
-
-    const companyInput = document.getElementById("companyInput");
-    const passcodeInput = document.getElementById("passcodeInput");
-
     // =========================
     // Local state
     // =========================
     let selectedFile = null;
     let selectedDataUrl = null; // for local history saves
-    let authMode = "login";     // "login" or "create"
-    let currentCompany = null;
+    let lastObjectUrl = null;
 
     const LOCAL_HISTORY_KEY = "estate_ai_local_history_v1";
     const LOCAL_HISTORY_LIMIT = 25;
@@ -230,11 +171,15 @@
       catch { return iso; }
     }
 
+    function stripCodeFences(s) {
+      return String(s ?? "").replace(/```json|```/gi, "").trim();
+    }
+
     async function readJsonOrText(resp) {
       const ct = resp.headers.get("content-type") || "";
       if (ct.includes("application/json")) return await resp.json();
       const text = await resp.text();
-      try { return JSON.parse(text); } catch { return { detail: text }; }
+      try { return JSON.parse(stripCodeFences(text)); } catch { return { detail: text }; }
     }
 
     // =========================
@@ -373,23 +318,27 @@
         const price = item?.result?.suggested_listing_price || "";
         const range = item?.result?.estimated_value_range || "";
 
+        // Prefer server-provided image_url if present; fallback to image_data_url if your backend returns it
+        const imgSrc = item.image_url || item.image_data_url || "";
+
         const div = document.createElement("div");
         div.className = "historyItem";
         div.onclick = () => {
-          // open result (no re-scan)
           selectedFile = null;
-          selectedDataUrl = item.image_data_url || null;
-          if (selectedDataUrl) {
-            preview.src = selectedDataUrl;
+          selectedDataUrl = imgSrc || null;
+
+          if (imgSrc) {
+            preview.src = imgSrc;
             preview.style.display = "block";
             previewHint.textContent = "Loaded from team history.";
           }
+
           statusEl.innerHTML = `<span class="ok">Loaded ✅</span>`;
           renderResult(item.result);
         };
 
         div.innerHTML = `
-          <img class="thumb" src="${escapeHtml(item.image_data_url || "")}" alt="thumb" />
+          <img class="thumb" src="${escapeHtml(imgSrc)}" alt="thumb" />
           <div class="historyMeta">
             <div class="title">${escapeHtml(title)}</div>
             <div>${escapeHtml(range)} ${price ? " • " + escapeHtml(price) : ""}</div>
@@ -402,10 +351,11 @@
 
     async function refreshTeamHistory() {
       try {
+        // If your backend uses /history, change this to "/history?limit=25"
         const resp = await fetch("/team/history?limit=25");
         if (!resp.ok) {
-          const err = await readJsonOrText(resp);
-          if (resp.status === 401) showLogin(true, "Login required");
+          // If not logged in, backend should redirect to /login; browser will show it when navigating.
+          // Here we just stop quietly.
           return;
         }
         const data = await resp.json();
@@ -413,95 +363,6 @@
       } catch (e) {
         console.error(e);
       }
-    }
-
-    // =========================
-    // Auth modal
-    // =========================
-    function setAuthMode(mode) {
-      authMode = mode;
-      authMsg.textContent = "";
-      tabLogin.classList.toggle("active", mode === "login");
-      tabCreate.classList.toggle("active", mode === "create");
-      authBtn.textContent = mode === "login" ? "Login" : "Create Company";
-    }
-
-    function showLogin(show, message) {
-      overlay.style.display = show ? "flex" : "none";
-      authMsg.textContent = message || "";
-    }
-
-    async function submitAuth() {
-      authMsg.textContent = "";
-      const company = (companyInput.value || "").trim();
-      const passcode = (passcodeInput.value || "").trim();
-
-      if (!company || !passcode) {
-        authMsg.textContent = "Enter company + passcode.";
-        return;
-      }
-
-      const endpoint = authMode === "login" ? "/login" : "/company/create";
-
-      try {
-        const resp = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ company, passcode })
-        });
-
-        const data = await readJsonOrText(resp);
-
-        if (!resp.ok) {
-          // display FastAPI error cleanly
-          authMsg.textContent = data?.detail || "Request failed.";
-          return;
-        }
-
-        if (authMode === "create") {
-          // after creation, switch to login for clarity
-          setAuthMode("login");
-          authMsg.textContent = "Company created. Now login.";
-          return;
-        }
-
-        // Logged in
-        currentCompany = data.company;
-        whoami.textContent = `Logged in as: ${currentCompany}`;
-        showLogin(false);
-
-        await refreshTeamHistory();
-
-      } catch (e) {
-        console.error(e);
-        authMsg.textContent = "Network error.";
-      }
-    }
-
-    async function ensureLoggedIn() {
-      try {
-        const resp = await fetch("/me");
-        const data = await resp.json();
-        if (!data.logged_in) {
-          showLogin(true, "");
-        } else {
-          currentCompany = data.company;
-          whoami.textContent = `Logged in as: ${currentCompany}`;
-          showLogin(false);
-          await refreshTeamHistory();
-        }
-      } catch (e) {
-        console.error(e);
-        showLogin(true, "Could not reach server.");
-      }
-    }
-
-    async function logout() {
-      try {
-        await fetch("/logout", { method: "POST" });
-      } catch {}
-      currentCompany = null;
-      showLogin(true, "Logged out.");
     }
 
     // =========================
@@ -521,16 +382,31 @@
       if (!file) return;
 
       selectedFile = file;
+      selectedDataUrl = null;
+
       statusEl.textContent = "";
       resultEl.innerHTML = "";
 
-      const objectUrl = URL.createObjectURL(file);
-      preview.src = objectUrl;
+      // Prevent Analyze until base64 is ready (avoids null thumbnails)
+      analyzeBtn.disabled = true;
+      previewHint.textContent = "Loading image…";
+
+      if (lastObjectUrl) URL.revokeObjectURL(lastObjectUrl);
+      lastObjectUrl = URL.createObjectURL(file);
+
+      preview.src = lastObjectUrl;
       preview.style.display = "block";
-      previewHint.textContent = "Ready to analyze.";
 
       const reader = new FileReader();
-      reader.onload = () => { selectedDataUrl = reader.result; };
+      reader.onload = () => {
+        selectedDataUrl = reader.result;
+        previewHint.textContent = "Ready to analyze.";
+        analyzeBtn.disabled = false;
+      };
+      reader.onerror = () => {
+        previewHint.textContent = "Could not read image.";
+        analyzeBtn.disabled = false;
+      };
       reader.readAsDataURL(file);
     }
 
@@ -545,9 +421,13 @@
         statusEl.innerHTML = `<span class="err">Select a photo first.</span>`;
         return;
       }
+      if (!selectedDataUrl) {
+        statusEl.innerHTML = `<span class="err">Please wait—image still loading.</span>`;
+        return;
+      }
 
       analyzeBtn.disabled = true;
-      statusEl.textContent = "Analyzing… (first scan may take ~30 seconds if server is waking up)";
+      statusEl.textContent = "Analyzing…";
       resultEl.innerHTML = "";
 
       const formData = new FormData();
@@ -555,27 +435,25 @@
 
       try {
         const resp = await fetch("/analyze-image", { method: "POST", body: formData });
+        const data = await readJsonOrText(resp);
 
         if (!resp.ok) {
-          const err = await readJsonOrText(resp);
-          if (resp.status === 401) {
-            showLogin(true, "Login required");
-            throw new Error("Login required");
-          }
-          throw new Error(err?.detail || `Server error ${resp.status}`);
+          // If backend redirects to /login, fetch won't navigate; user will see error.
+          const msg = data?.detail || `Server error ${resp.status}`;
+          throw new Error(msg);
         }
-
-        const data = await resp.json();
 
         statusEl.innerHTML = `<span class="ok">Done ✅</span>`;
         renderResult(data);
 
-        // Save to local history (device)
-        addToLocalHistory({
-          created_at: nowIso(),
-          image_data_url: selectedDataUrl,
-          result: data
-        });
+        // Save to local history only when scan succeeds
+        if (!data?.error) {
+          addToLocalHistory({
+            created_at: nowIso(),
+            image_data_url: selectedDataUrl,
+            result: data
+          });
+        }
 
         // Refresh shared team history
         await refreshTeamHistory();
@@ -593,7 +471,7 @@
     // Init
     // =========================
     renderLocalHistory();
-    ensureLoggedIn();
+    refreshTeamHistory();
   </script>
 </body>
 </html>
