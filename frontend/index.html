@@ -4,6 +4,8 @@
      - "Use Camera" opens rear camera on phones
      - Local History saved per device (localStorage) — TEXT ONLY (no base64 images; avoids quota)
      - Team History pulled from server (shared) — includes thumbnails from backend
+     - Team History tap-proofing + selection highlight + auto-scroll to results
+     - Result UI standardized to NEW JSON format + Confidence UX upgrade
 -->
 
 <!doctype html>
@@ -87,7 +89,7 @@
     .historyMeta .title { font-weight: 800; color: #111; margin-bottom: 2px; }
     .historyMeta .time { color: #666; font-size: 12px; }
 
-    /* Tiny UX label in Team History cards */
+    /* Small badge for Team History cards */
     .badge {
       display: inline-block;
       font-size: 11px;
@@ -105,6 +107,34 @@
       box-shadow: 0 0 0 2px rgba(43, 124, 255, 0.18);
       background: #f4f8ff;
     }
+
+    /* Confidence UX */
+    .confWrap { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 10px 0 6px; }
+    .confPill {
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+      border-radius: 999px;
+      padding: 3px 10px;
+      font-size: 12px;
+      border: 1px solid #ddd;
+      background: #f7f7f7;
+      color: #333;
+    }
+    .confPill strong { font-weight: 800; }
+    .confHigh { border-color: rgba(10, 122, 10, 0.35); background: rgba(10, 122, 10, 0.08); color: #0a7a0a; }
+    .confMed  { border-color: rgba(176, 112, 0, 0.35); background: rgba(176, 112, 0, 0.08); color: #7a4a00; }
+    .confLow  { border-color: rgba(176, 0, 32, 0.30); background: rgba(176, 0, 32, 0.06); color: #b00020; }
+    .confTip {
+      font-size: 12px;
+      color: #555;
+      background: #fafafa;
+      border: 1px solid #eee;
+      border-radius: 10px;
+      padding: 10px;
+      margin: 8px 0 0;
+    }
+    .confTip ul { margin: 6px 0 0 18px; }
 
     pre {
       white-space: pre-wrap;
@@ -237,6 +267,16 @@
       return payload;
     }
 
+    function fmtUsd(n) {
+      const num = Number(n);
+      if (!isFinite(num)) return "";
+      try {
+        return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(num);
+      } catch {
+        return `$${Math.round(num)}`;
+      }
+    }
+
     // =========================
     // Local history (device) — TEXT ONLY
     // =========================
@@ -269,8 +309,11 @@
       previewHint.textContent = "Local history cleared.";
     }
 
-    function renderResult(resultObj) {
-      const data = extractResult(resultObj);
+    // =========================
+    // Result UI (STANDARDIZED NEW JSON) + Confidence UX
+    // =========================
+    function renderResult(payloadOrResult) {
+      const data = extractResult(payloadOrResult);
 
       if (!data || typeof data !== "object") {
         resultEl.innerHTML = `<pre>${escapeHtml(String(data))}</pre>`;
@@ -283,50 +326,96 @@
         return;
       }
 
-      // Supports older schema (item_name...) AND newer schema (title...)
-      const itemName = data.item_name ?? data.title ?? "Unknown item";
-      const brand = data.brand_or_origin ?? data.brand ?? data.category ?? "";
-      const range = data.estimated_value_range ?? (
-        (data.price_range_low != null && data.price_range_high != null)
-          ? `$${data.price_range_low}–$${data.price_range_high}`
-          : ""
-      );
-      const price = data.suggested_listing_price ?? (
-        data.suggested_list_price != null ? `$${data.suggested_list_price}` : ""
-      );
-      const condition = data.condition_assumptions ?? data.condition_notes ?? "";
+      const title = (data.title ?? "").trim();
+      const category = (data.category ?? "").trim();
+      const condition = (data.condition_notes ?? "").trim();
 
-      const kw = Array.isArray(data.keywords_for_listing)
-        ? data.keywords_for_listing.join(", ")
-        : Array.isArray(data.keywords)
-          ? data.keywords.join(", ")
-          : (data.keywords_for_listing ?? data.keywords ?? "");
+      const low = (data.price_range_low != null && data.price_range_low !== "") ? Number(data.price_range_low) : null;
+      const high = (data.price_range_high != null && data.price_range_high !== "") ? Number(data.price_range_high) : null;
+      const listPrice = (data.suggested_list_price != null && data.suggested_list_price !== "") ? Number(data.suggested_list_price) : null;
 
-      const sources = Array.isArray(data.pricing_sources)
-        ? data.pricing_sources
-        : (typeof data.pricing_sources === "string" && data.pricing_sources.trim()
-            ? data.pricing_sources.split(",").map(s => s.trim()).filter(Boolean)
-            : []);
+      const keywords = Array.isArray(data.keywords) ? data.keywords.filter(Boolean) : [];
+      const rationale = data.rationale ?? "";
+      const rationaleText = Array.isArray(rationale) ? rationale.join("\n") : String(rationale || "");
 
-      const rationale = Array.isArray(data.rationale) ? data.rationale.join("\n") : (data.rationale ?? "");
+      // Confidence UX
+      let confPct = null;
+      if (typeof data.confidence === "number" && isFinite(data.confidence)) {
+        confPct = Math.max(0, Math.min(100, Math.round(data.confidence * 100)));
+      }
+
+      let confLabel = "";
+      let confClass = "";
+      let confTip = "";
+
+      if (confPct != null) {
+        if (confPct >= 75) {
+          confLabel = "High";
+          confClass = "confHigh";
+          confTip = "";
+        } else if (confPct >= 45) {
+          confLabel = "Medium";
+          confClass = "confMed";
+          confTip = "If this looks off, retake the photo with better lighting or include the full item in frame.";
+        } else {
+          confLabel = "Low";
+          confClass = "confLow";
+          confTip = "Try a quick re-photo to improve accuracy:";
+        }
+      }
+
+      const rangeStr =
+        (low != null && high != null) ? `${fmtUsd(low)} – ${fmtUsd(high)}` :
+        (low != null) ? `${fmtUsd(low)}+` :
+        (high != null) ? `Up to ${fmtUsd(high)}` :
+        "";
+
+      const listStr = (listPrice != null) ? fmtUsd(listPrice) : "";
 
       resultEl.innerHTML = `
-        <div class="resultLine"><span class="label">Item:</span> ${escapeHtml(itemName)}</div>
-        ${brand ? `<div class="resultLine"><span class="label">Brand/Category:</span> ${escapeHtml(brand)}</div>` : ""}
-        ${range ? `<div class="resultLine"><span class="label">Estimated Value Range:</span> ${escapeHtml(range)}</div>` : ""}
-        ${price ? `<div class="resultLine"><span class="label">Suggested Listing Price:</span> ${escapeHtml(price)}</div>` : ""}
-        ${condition ? `<div class="resultLine"><span class="label">Condition:</span> ${escapeHtml(condition)}</div>` : ""}
-        ${kw ? `<div class="resultLine"><span class="label">Keywords:</span> ${escapeHtml(kw)}</div>` : ""}
-        ${rationale ? `<div class="resultLine" style="margin-top:10px;"><span class="label">Rationale:</span><pre>${escapeHtml(rationale)}</pre></div>` : ""}
-        ${sources.length ? `
-          <div class="resultLine" style="margin-top:10px;">
-            <span class="label">Pricing Sources:</span>
-            <ul>${sources.map(s => `<li>${escapeHtml(s)}</li>`).join("")}</ul>
+        <div class="resultLine"><span class="label">Item:</span> ${escapeHtml(title || "Unknown item")}</div>
+        ${category ? `<div class="resultLine"><span class="label">Category:</span> ${escapeHtml(category)}</div>` : ""}
+        ${condition ? `<div class="resultLine"><span class="label">Condition Notes:</span> ${escapeHtml(condition)}</div>` : ""}
+
+        ${rangeStr ? `<div class="resultLine"><span class="label">Estimated Value Range:</span> ${escapeHtml(rangeStr)}</div>` : ""}
+        ${listStr ? `<div class="resultLine"><span class="label">Suggested Listing Price:</span> ${escapeHtml(listStr)}</div>` : ""}
+
+        ${confPct != null ? `
+          <div class="confWrap">
+            <div class="confPill ${confClass}">
+              <strong>Confidence</strong>
+              <span>${escapeHtml(String(confPct))}%</span>
+              <span>(${escapeHtml(confLabel)})</span>
+            </div>
           </div>
         ` : ""}
+
+        ${keywords.length ? `<div class="resultLine"><span class="label">Keywords:</span> ${escapeHtml(keywords.join(", "))}</div>` : ""}
+
+        ${rationaleText.trim()
+          ? `<div class="resultLine" style="margin-top:10px;"><span class="label">Rationale:</span><pre>${escapeHtml(rationaleText)}</pre></div>`
+          : ""
+        }
+
+        ${confPct != null && confPct < 45 ? `
+          <div class="confTip">
+            <div><strong>Low confidence:</strong> ${escapeHtml(confTip)}</div>
+            <ul>
+              <li>Include the entire item (not cropped)</li>
+              <li>Get closer to brand labels / maker marks</li>
+              <li>Use brighter lighting and reduce glare</li>
+              <li>Take a second angle if needed</li>
+            </ul>
+          </div>
+        ` : (confPct != null && confPct < 75 && confTip ? `
+          <div class="confTip">${escapeHtml(confTip)}</div>
+        ` : "")}
       `;
     }
 
+    // =========================
+    // Local History rendering (NEW JSON)
+    // =========================
     function renderLocalHistory() {
       const items = readLocalHistory();
       historyEl.innerHTML = "";
@@ -339,12 +428,12 @@
 
       items.forEach((item, idx) => {
         const r = item?.result || {};
-        const title = r?.item_name ?? r?.title ?? "Unknown item";
+        const title = (r?.title ?? "Unknown item").trim();
         const time = item?.created_at ? formatTime(item.created_at) : "";
-        const price = r?.suggested_listing_price ?? (r?.suggested_list_price != null ? `$${r.suggested_list_price}` : "");
-        const range = r?.estimated_value_range ?? (
-          (r?.price_range_low != null && r?.price_range_high != null) ? `$${r.price_range_low}–$${r.price_range_high}` : ""
-        );
+        const price = (r?.suggested_list_price != null) ? fmtUsd(r.suggested_list_price) : "";
+        const range = (r?.price_range_low != null && r?.price_range_high != null)
+          ? `${fmtUsd(r.price_range_low)}–${fmtUsd(r.price_range_high)}`
+          : "";
 
         const div = document.createElement("div");
         div.className = "historyItem";
@@ -380,7 +469,7 @@
     }
 
     // =========================
-    // Team History (shared) — tap-proof + selection highlight + scroll
+    // Team History (shared) — tap-proof + selection highlight + scroll (NEW JSON)
     // =========================
     function renderTeamHistory(items) {
       teamHistoryEl.innerHTML = "";
@@ -392,16 +481,12 @@
 
       items.forEach((item) => {
         const r = item?.result || {};
-        const title = r?.item_name ?? r?.title ?? item?.title ?? "Unknown item";
+        const title = (r?.title ?? item?.title ?? "Unknown item").trim();
         const time = item?.created_at ? formatTime(item.created_at) : "";
-        const price =
-          r?.suggested_listing_price ??
-          (r?.suggested_list_price != null ? `$${r.suggested_list_price}` : "");
-        const range =
-          r?.estimated_value_range ??
-          ((r?.price_range_low != null && r?.price_range_high != null)
-            ? `$${r.price_range_low}–$${r.price_range_high}`
-            : "");
+        const price = (r?.suggested_list_price != null) ? fmtUsd(r.suggested_list_price) : "";
+        const range = (r?.price_range_low != null && r?.price_range_high != null)
+          ? `${fmtUsd(r.price_range_low)}–${fmtUsd(r.price_range_high)}`
+          : "";
 
         const imgSrc = item.image_url || "";
 
@@ -422,11 +507,9 @@
         `;
 
         const onSelect = () => {
-          // Clear selection highlight
           teamHistoryEl.querySelectorAll(".historyItem.selected").forEach(el => el.classList.remove("selected"));
           div.classList.add("selected");
 
-          // Preview
           selectedFile = null;
           selectedDataUrl = imgSrc || null;
 
@@ -439,15 +522,11 @@
             previewHint.textContent = "Loaded from team history (no image available).";
           }
 
-          // Result + status
           statusEl.innerHTML = `<span class="ok">Loaded ✅</span> Loaded from team history.`;
           renderResult(item.result);
-
-          // Make the update visible on mobile
           resultEl.scrollIntoView({ behavior: "smooth", block: "start" });
         };
 
-        // Tap-proof handlers
         div.addEventListener("click", onSelect);
         div.addEventListener("touchend", (e) => {
           e.preventDefault();
@@ -560,7 +639,7 @@
         renderResult(payload);
 
         const r = extractResult(payload);
-        if (!r?.error) {
+        if (r && typeof r === "object" && !r.error) {
           // Local history: store results only (NO image) to avoid mobile storage quota
           addToLocalHistory({
             created_at: payload.created_at || nowIso(),
