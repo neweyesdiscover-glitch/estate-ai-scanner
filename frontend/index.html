@@ -2,8 +2,8 @@
      ✅ Estate AI Scanner — Camera + Local History + Shared Team History
      - NO login logic in frontend (backend handles /login redirect)
      - "Use Camera" opens rear camera on phones
-     - Local History saved per device (localStorage)
-     - Team History pulled from server (shared)
+     - Local History saved per device (localStorage) — TEXT ONLY (no base64 images; avoids quota)
+     - Team History pulled from server (shared) — includes thumbnails from backend
 -->
 
 <!doctype html>
@@ -56,7 +56,26 @@
       cursor: pointer;
     }
     .historyItem:hover { background: #fafafa; }
-    .thumb { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; border: 1px solid #eee; }
+    .thumb {
+      width: 72px; height: 72px;
+      object-fit: cover;
+      border-radius: 8px;
+      border: 1px solid #eee;
+      display: block;
+      background: #f7f7f7;
+    }
+    .thumbPlaceholder {
+      width: 72px; height: 72px;
+      border-radius: 8px;
+      border: 1px solid #eee;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #f7f7f7;
+      color: #777;
+      font-size: 12px;
+      user-select: none;
+    }
     .historyMeta { font-size: 13px; color: #444; }
     .historyMeta .title { font-weight: 800; color: #111; margin-bottom: 2px; }
     .historyMeta .time { color: #666; font-size: 12px; }
@@ -119,6 +138,7 @@
       <h3>Local History (this device)</h3>
       <div id="history" class="historyList"></div>
       <div id="historyEmpty" class="status">No local scans saved yet.</div>
+      <div class="small">Note: Local history stores results only (no photos) to avoid storage limits on phones.</div>
     </div>
   </div>
 
@@ -144,7 +164,7 @@
     // Local state
     // =========================
     let selectedFile = null;
-    let selectedDataUrl = null; // for local history saves
+    let selectedDataUrl = null; // used only for current preview during selection
     let lastObjectUrl = null;
 
     const LOCAL_HISTORY_KEY = "estate_ai_local_history_v1";
@@ -187,12 +207,12 @@
       if (payload && typeof payload === "object" && payload.result && typeof payload.result === "object") {
         return payload.result;
       }
-      // Fallback: if backend ever returns the result object directly
+      // Fallback if backend returns result object directly
       return payload;
     }
 
     // =========================
-    // Local history (device)
+    // Local history (device) — TEXT ONLY
     // =========================
     function readLocalHistory() {
       try {
@@ -219,6 +239,8 @@
       renderLocalHistory();
       statusEl.textContent = "";
       resultEl.innerHTML = "";
+      preview.style.display = "none";
+      previewHint.textContent = "Local history cleared.";
     }
 
     function renderResult(resultObj) {
@@ -303,7 +325,7 @@
         div.onclick = () => openLocalHistoryItem(idx);
 
         div.innerHTML = `
-          <img class="thumb" src="${escapeHtml(item.image_data_url || "")}" alt="thumb" />
+          <div class="thumbPlaceholder">No image</div>
           <div class="historyMeta">
             <div class="title">${escapeHtml(title)}</div>
             <div>${escapeHtml(range)} ${price ? " • " + escapeHtml(price) : ""}</div>
@@ -321,13 +343,10 @@
       if (!item) return;
 
       selectedFile = null;
-      selectedDataUrl = item.image_data_url || null;
+      selectedDataUrl = null;
 
-      if (selectedDataUrl) {
-        preview.src = selectedDataUrl;
-        preview.style.display = "block";
-        previewHint.textContent = "Loaded from local history.";
-      }
+      preview.style.display = "none";
+      previewHint.textContent = "Loaded from local history (no image stored on device).";
 
       statusEl.innerHTML = `<span class="ok">Loaded ✅</span>`;
       renderResult(item.result);
@@ -365,6 +384,9 @@
             preview.src = imgSrc;
             preview.style.display = "block";
             previewHint.textContent = "Loaded from team history.";
+          } else {
+            preview.style.display = "none";
+            previewHint.textContent = "Loaded from team history.";
           }
 
           statusEl.innerHTML = `<span class="ok">Loaded ✅</span>`;
@@ -387,7 +409,6 @@
       try {
         const resp = await fetch("/history?limit=25");
         if (resp.status === 401) {
-          // Not logged in; server redirects for page loads, but fetch just returns 401.
           renderTeamHistory([]);
           return;
         }
@@ -482,16 +503,14 @@
           throw new Error(msg);
         }
 
-        // payload has: { scan_id, created_at, company_code, result }
         statusEl.innerHTML = `<span class="ok">Done ✅</span>`;
         renderResult(payload);
 
-        // Save to local history (store only the result object to keep consistent)
         const r = extractResult(payload);
         if (!r?.error) {
+          // Local history: store results only (NO image) to avoid mobile storage quota
           addToLocalHistory({
             created_at: payload.created_at || nowIso(),
-            image_data_url: selectedDataUrl,
             result: r
           });
         }
