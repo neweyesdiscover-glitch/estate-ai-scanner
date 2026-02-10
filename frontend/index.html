@@ -182,6 +182,15 @@
       try { return JSON.parse(stripCodeFences(text)); } catch { return { detail: text }; }
     }
 
+    function extractResult(payload) {
+      // Backend returns: { scan_id, created_at, company_code, result: {...} }
+      if (payload && typeof payload === "object" && payload.result && typeof payload.result === "object") {
+        return payload.result;
+      }
+      // Fallback: if backend ever returns the result object directly
+      return payload;
+    }
+
     // =========================
     // Local history (device)
     // =========================
@@ -212,7 +221,9 @@
       resultEl.innerHTML = "";
     }
 
-    function renderResult(data) {
+    function renderResult(resultObj) {
+      const data = extractResult(resultObj);
+
       if (!data || typeof data !== "object") {
         resultEl.innerHTML = `<pre>${escapeHtml(String(data))}</pre>`;
         return;
@@ -224,9 +235,24 @@
         return;
       }
 
+      // Supports your older schema (item_name...) AND the newer schema (title...)
+      const itemName = data.item_name ?? data.title ?? "Unknown item";
+      const brand = data.brand_or_origin ?? data.brand ?? data.category ?? "";
+      const range = data.estimated_value_range ?? (
+        (data.price_range_low != null && data.price_range_high != null)
+          ? `$${data.price_range_low}–$${data.price_range_high}`
+          : ""
+      );
+      const price = data.suggested_listing_price ?? (
+        data.suggested_list_price != null ? `$${data.suggested_list_price}` : ""
+      );
+      const condition = data.condition_assumptions ?? data.condition_notes ?? "";
+
       const kw = Array.isArray(data.keywords_for_listing)
         ? data.keywords_for_listing.join(", ")
-        : (data.keywords_for_listing ?? "");
+        : Array.isArray(data.keywords)
+          ? data.keywords.join(", ")
+          : (data.keywords_for_listing ?? data.keywords ?? "");
 
       const sources = Array.isArray(data.pricing_sources)
         ? data.pricing_sources
@@ -234,13 +260,16 @@
             ? data.pricing_sources.split(",").map(s => s.trim()).filter(Boolean)
             : []);
 
+      const rationale = Array.isArray(data.rationale) ? data.rationale.join("\n") : (data.rationale ?? "");
+
       resultEl.innerHTML = `
-        <div class="resultLine"><span class="label">Item:</span> ${escapeHtml(data.item_name)}</div>
-        <div class="resultLine"><span class="label">Brand/Origin:</span> ${escapeHtml(data.brand_or_origin)}</div>
-        <div class="resultLine"><span class="label">Estimated Value Range:</span> ${escapeHtml(data.estimated_value_range)}</div>
-        <div class="resultLine"><span class="label">Suggested Listing Price:</span> ${escapeHtml(data.suggested_listing_price)}</div>
-        <div class="resultLine"><span class="label">Condition:</span> ${escapeHtml(data.condition_assumptions)}</div>
-        <div class="resultLine"><span class="label">Keywords:</span> ${escapeHtml(kw)}</div>
+        <div class="resultLine"><span class="label">Item:</span> ${escapeHtml(itemName)}</div>
+        ${brand ? `<div class="resultLine"><span class="label">Brand/Category:</span> ${escapeHtml(brand)}</div>` : ""}
+        ${range ? `<div class="resultLine"><span class="label">Estimated Value Range:</span> ${escapeHtml(range)}</div>` : ""}
+        ${price ? `<div class="resultLine"><span class="label">Suggested Listing Price:</span> ${escapeHtml(price)}</div>` : ""}
+        ${condition ? `<div class="resultLine"><span class="label">Condition:</span> ${escapeHtml(condition)}</div>` : ""}
+        ${kw ? `<div class="resultLine"><span class="label">Keywords:</span> ${escapeHtml(kw)}</div>` : ""}
+        ${rationale ? `<div class="resultLine" style="margin-top:10px;"><span class="label">Rationale:</span><pre>${escapeHtml(rationale)}</pre></div>` : ""}
         ${sources.length ? `
           <div class="resultLine" style="margin-top:10px;">
             <span class="label">Pricing Sources:</span>
@@ -261,10 +290,13 @@
       historyEmptyEl.style.display = "none";
 
       items.forEach((item, idx) => {
-        const title = item?.result?.item_name || "Unknown item";
+        const r = item?.result || {};
+        const title = r?.item_name ?? r?.title ?? "Unknown item";
         const time = item?.created_at ? formatTime(item.created_at) : "";
-        const price = item?.result?.suggested_listing_price || "";
-        const range = item?.result?.estimated_value_range || "";
+        const price = r?.suggested_listing_price ?? (r?.suggested_list_price != null ? `$${r.suggested_list_price}` : "");
+        const range = r?.estimated_value_range ?? (
+          (r?.price_range_low != null && r?.price_range_high != null) ? `$${r.price_range_low}–$${r.price_range_high}` : ""
+        );
 
         const div = document.createElement("div");
         div.className = "historyItem";
@@ -288,7 +320,7 @@
       const item = items[index];
       if (!item) return;
 
-      selectedFile = null; // already analyzed
+      selectedFile = null;
       selectedDataUrl = item.image_data_url || null;
 
       if (selectedDataUrl) {
@@ -313,13 +345,15 @@
       teamEmptyEl.style.display = "none";
 
       items.forEach((item) => {
-        const title = item?.result?.item_name || "Unknown item";
+        const r = item?.result || {};
+        const title = r?.item_name ?? r?.title ?? item?.title ?? "Unknown item";
         const time = item?.created_at ? formatTime(item.created_at) : "";
-        const price = item?.result?.suggested_listing_price || "";
-        const range = item?.result?.estimated_value_range || "";
+        const price = r?.suggested_listing_price ?? (r?.suggested_list_price != null ? `$${r.suggested_list_price}` : "");
+        const range = r?.estimated_value_range ?? (
+          (r?.price_range_low != null && r?.price_range_high != null) ? `$${r.price_range_low}–$${r.price_range_high}` : ""
+        );
 
-        // Prefer server-provided image_url if present; fallback to image_data_url if your backend returns it
-        const imgSrc = item.image_url || item.image_data_url || "";
+        const imgSrc = item.image_url || "";
 
         const div = document.createElement("div");
         div.className = "historyItem";
@@ -351,13 +385,13 @@
 
     async function refreshTeamHistory() {
       try {
-        // If your backend uses /history, change this to "/history?limit=25"
-        const resp = await fetch("/team/history?limit=25");
-        if (!resp.ok) {
-          // If not logged in, backend should redirect to /login; browser will show it when navigating.
-          // Here we just stop quietly.
+        const resp = await fetch("/history?limit=25");
+        if (resp.status === 401) {
+          // Not logged in; server redirects for page loads, but fetch just returns 401.
+          renderTeamHistory([]);
           return;
         }
+        if (!resp.ok) return;
         const data = await resp.json();
         renderTeamHistory(data.items || []);
       } catch (e) {
@@ -387,7 +421,6 @@
       statusEl.textContent = "";
       resultEl.innerHTML = "";
 
-      // Prevent Analyze until base64 is ready (avoids null thumbnails)
       analyzeBtn.disabled = true;
       previewHint.textContent = "Loading image…";
 
@@ -431,31 +464,38 @@
       resultEl.innerHTML = "";
 
       const formData = new FormData();
-      formData.append("file", selectedFile);
+      // IMPORTANT: backend expects field name "image"
+      formData.append("image", selectedFile);
 
       try {
         const resp = await fetch("/analyze-image", { method: "POST", body: formData });
-        const data = await readJsonOrText(resp);
+
+        if (resp.status === 401) {
+          statusEl.innerHTML = `<span class="err">Not logged in.</span> Please refresh the page.`;
+          return;
+        }
+
+        const payload = await readJsonOrText(resp);
 
         if (!resp.ok) {
-          // If backend redirects to /login, fetch won't navigate; user will see error.
-          const msg = data?.detail || `Server error ${resp.status}`;
+          const msg = payload?.error || payload?.detail || `Server error ${resp.status}`;
           throw new Error(msg);
         }
 
+        // payload has: { scan_id, created_at, company_code, result }
         statusEl.innerHTML = `<span class="ok">Done ✅</span>`;
-        renderResult(data);
+        renderResult(payload);
 
-        // Save to local history only when scan succeeds
-        if (!data?.error) {
+        // Save to local history (store only the result object to keep consistent)
+        const r = extractResult(payload);
+        if (!r?.error) {
           addToLocalHistory({
-            created_at: nowIso(),
+            created_at: payload.created_at || nowIso(),
             image_data_url: selectedDataUrl,
-            result: data
+            result: r
           });
         }
 
-        // Refresh shared team history
         await refreshTeamHistory();
 
       } catch (e) {
