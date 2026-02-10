@@ -168,32 +168,7 @@
     </div>
   </div>
 
-  <!-- Login Modal -->
-  <div id="overlay" class="overlay">
-    <div class="modal">
-      <h2>Company Login</h2>
-      <div class="small">Use your company name + passcode.</div>
 
-      <div class="tabs">
-        <div id="tabLogin" class="tab active" onclick="setAuthMode('login')">Login</div>
-        <div id="tabCreate" class="tab" onclick="setAuthMode('create')">Create Company</div>
-      </div>
-
-      <div class="field">
-        <input id="companyInput" placeholder="company name (e.g. demo)" />
-      </div>
-      <div class="field">
-        <input id="passcodeInput" placeholder="passcode" type="password" />
-      </div>
-
-      <div class="modalActions">
-        <button class="primary" onclick="submitAuth()" id="authBtn">Login</button>
-      </div>
-
-      <div class="modalMsg" id="authMsg"></div>
-      <div class="whoami" id="whoami"></div>
-    </div>
-  </div>
 
   <script>
     // =========================
