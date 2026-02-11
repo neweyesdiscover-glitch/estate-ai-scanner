@@ -280,22 +280,11 @@
     `;
   }
 
-  function formatMoney(v) {
-    if (v === null || v === undefined) return "";
-    if (typeof v === "number") return `$${v}`;
-    const s = String(v).trim();
-    if (!s) return "";
-    if (s.includes("$")) return s;
-    return s;
-  }
-
-  function formatBundleRange(br) {
-    // supports {low,high} or "10-20"
-    if (!br) return "";
-    if (typeof br === "string") return br.includes("$") ? br : br;
-    const low = br.low ?? br.min ?? null;
-    const high = br.high ?? br.max ?? null;
-    if (low === null && high === null) return "";
+  function moneyRange(obj) {
+    // obj can be {low,high} or {min,max}
+    if (!obj || typeof obj !== "object") return "";
+    const low = obj.low ?? obj.min ?? null;
+    const high = obj.high ?? obj.max ?? null;
     if (low !== null && high !== null) return `$${low} – $${high}`;
     if (low !== null) return `$${low}+`;
     if (high !== null) return `Up to $${high}`;
@@ -305,17 +294,18 @@
   function renderStructured(payload) {
     const data = payload?.result ? payload.result : payload;
 
-    // Items array
     const items = Array.isArray(data?.items) ? data.items : [];
+    const bundleRange = data?.bundle_price_range || data?.bundle_price || null;
 
-    // Bundle range might be at top-level
-    const bundleRangeTop = data?.bundle_price_range || null;
+    // suggestions can appear in multiple places depending on schema
+    const suggestions =
+      data?.suggestions ||
+      data?.notes?.suggestions ||
+      data?.advisory?.suggestions ||
+      "";
 
-    // Advisory tips might be at advisory.tips[]
     const advisoryTips = Array.isArray(data?.advisory?.tips) ? data.advisory.tips : [];
-
-    // Older schema compatibility:
-    const notes = data?.notes || {};
+    const clarification = data?.notes?.clarification_request || data?.clarification_request || "";
 
     if (!items.length) {
       const box = document.createElement("div");
@@ -325,17 +315,25 @@
       return;
     }
 
-    // Show advisory / notes at the top if present
-    const noteLines = [];
-    if (notes?.clarification_request) noteLines.push(`• ${notes.clarification_request}`);
-    if (notes?.suggestions) noteLines.push(`• ${notes.suggestions}`);
-    advisoryTips.forEach(t => noteLines.push(`• ${t}`));
+    // Improve accuracy box (top)
+    const improveLines = [];
+    if (clarification) improveLines.push(`• ${clarification}`);
+    if (suggestions) improveLines.push(`• ${suggestions}`);
+    advisoryTips.forEach(t => improveLines.push(`• ${t}`));
 
-    if (noteLines.length) {
+    if (improveLines.length) {
       const box = document.createElement("div");
       box.className = "notesBox";
-      box.innerHTML = `<div class="notesTitle">Improve accuracy</div>${noteLines.map(l => `<div>${escapeHtml(l)}</div>`).join("")}`;
+      box.innerHTML = `<div class="notesTitle">Improve accuracy</div>${improveLines.map(l => `<div>${escapeHtml(l)}</div>`).join("")}`;
       resultEl.appendChild(box);
+    }
+
+    // Bundle display (same for all items)
+    let bundleDisplay = "—";
+    if (typeof bundleRange === "string") bundleDisplay = bundleRange;
+    else {
+      const br = moneyRange(bundleRange);
+      if (br) bundleDisplay = br;
     }
 
     items.forEach((it, idx) => {
@@ -343,26 +341,20 @@
       card.className = "itemCard";
 
       const name = it?.name || it?.title || `Item ${idx + 1}`;
-      const type = it?.type || it?.category || "";
-      const details = it?.details || it?.condition_notes || it?.condition || "";
+      const description = it?.description || it?.details || "";
 
-      // Price mapping (new + old)
-      const priceNumber =
-        it?.estimated_price ??
-        it?.suggested_list_price ??
-        it?.suggested_listing_price ??
-        it?.pricing_estimate?.individual_price ??
-        null;
+      // individual price can be number OR {low,high}
+      const ep = it?.estimated_price ?? it?.suggested_listing_price ?? it?.suggested_list_price ?? null;
 
-      const indiv = formatMoney(priceNumber);
-
-      // Bundle mapping (new + old)
-      const bundle =
-        formatBundleRange(bundleRangeTop) ||
-        formatBundleRange(it?.pricing_estimate?.bundle_price_range) ||
-        formatBundleRange(it?.bundle_price_range) ||
-        formatMoney(it?.estimated_value_range) ||
-        "";
+      let individualDisplay = "—";
+      if (typeof ep === "number") {
+        individualDisplay = `$${ep}`;
+      } else if (ep && typeof ep === "object") {
+        const r = moneyRange(ep);
+        if (r) individualDisplay = r;
+      } else if (typeof ep === "string" && ep.trim()) {
+        individualDisplay = ep;
+      }
 
       card.innerHTML = `
         <div class="itemTitleRow">
@@ -371,18 +363,17 @@
         </div>
 
         <div class="meta">
-          ${type ? `<div><b>Type:</b> ${escapeHtml(type)}</div>` : ""}
-          ${details ? `<div><b>Details:</b> ${escapeHtml(details)}</div>` : ""}
+          ${description ? `<div><b>Description:</b> ${escapeHtml(description)}</div>` : ""}
         </div>
 
         <div class="priceRow">
           <div class="priceBox">
             <div class="priceLabel">Suggested listing price</div>
-            <div class="priceValue">${escapeHtml(indiv || "—")}</div>
+            <div class="priceValue">${escapeHtml(individualDisplay)}</div>
           </div>
           <div class="priceBox">
             <div class="priceLabel">Bundle / range</div>
-            <div class="priceValue">${escapeHtml(bundle || "—")}</div>
+            <div class="priceValue">${escapeHtml(bundleDisplay)}</div>
           </div>
         </div>
       `;
