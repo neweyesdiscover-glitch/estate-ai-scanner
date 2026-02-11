@@ -1,471 +1,886 @@
-import os
-import io
-import json
-import base64
-import sqlite3
-from uuid import uuid4
-from datetime import datetime, timezone
-from typing import Optional, Any, Dict
+<!-- frontend/index.html
+     ✅ Estate AI Scanner
+     - Single/Bundle vs Multi-item (max 8)
+     - Multiple photos of one item (add detail photos)
+     - Tips: what_to_check
+     - Follow-up questions + Refine
+     - Team history selectable + highlight + scroll
+     - Local history text-only (no storage quota issues)
+-->
 
-from fastapi import FastAPI, UploadFile, File, Form, Request, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, FileResponse
-from starlette.middleware.sessions import SessionMiddleware
-
-from openai import OpenAI
-
-
-# =========================
-# Config
-# =========================
-APP_NAME = "Estate AI Scanner"
-
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-MODEL_NAME = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-
-SECRET_KEY = os.getenv("SECRET_KEY", "")
-COMPANY_CODE = os.getenv("COMPANY_CODE", "demo")
-COMPANY_PASSWORD = os.getenv("COMPANY_PASSWORD", "demo")
-
-MAX_MULTI_ITEMS = int(os.getenv("MAX_MULTI_ITEMS", "8"))  # brief note: max items at once
-
-
-def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def get_data_root() -> str:
-    # Render disk mount (persistent)
-    if os.path.isdir("/var/data"):
-        return "/var/data"
-    # Local fallback
-    return os.path.join(os.path.dirname(__file__), "data")
-
-
-DATA_ROOT = get_data_root()
-UPLOAD_DIR = os.path.join(DATA_ROOT, "uploads")
-DB_PATH = os.path.join(DATA_ROOT, "app.db")
-FRONTEND_PATH = os.path.join(os.path.dirname(__file__), "..", "frontend", "index.html")
-
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-os.makedirs(DATA_ROOT, exist_ok=True)
-
-client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
-
-
-# =========================
-# DB helpers
-# =========================
-def db_connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def db_init() -> None:
-    conn = db_connect()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS scans (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            company_code TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            image_path TEXT NOT NULL,
-            result_json TEXT NOT NULL
-        );
-        """
-    )
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_scans_company_created ON scans(company_code, created_at);")
-    conn.commit()
-    conn.close()
-
-
-def extract_title_for_history(result_obj: dict) -> str:
-    # Single schema: {title, ...}
-    # Multi schema: {mode:"multi", bundle:{title,...}, items:[...]}
-    try:
-        if isinstance(result_obj, dict) and result_obj.get("mode") == "multi":
-            bundle = result_obj.get("bundle") or {}
-            title = bundle.get("title") or "Multi-item lot"
-            return str(title)
-        title = result_obj.get("title") or "Scan"
-        return str(title)
-    except Exception:
-        return "Scan"
-
-
-# =========================
-# Auth helpers
-# =========================
-def is_logged_in(request: Request) -> bool:
-    return bool(request.session.get("company_code"))
-
-
-def require_login_redirect(request: Request) -> str:
-    if not is_logged_in(request):
-        raise HTTPException(status_code=307, detail="Redirect", headers={"Location": "/login"})
-    return request.session.get("company_code")
-
-
-def require_login_json(request: Request) -> str:
-    if not is_logged_in(request):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    return request.session.get("company_code")
-
-
-# =========================
-# App
-# =========================
-app = FastAPI(title=APP_NAME)
-
-# Session cookies
-if not SECRET_KEY:
-    # You REALLY want this set on Render.
-    SECRET_KEY = "dev-only-secret-change-me"
-app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, same_site="lax", https_only=False)
-
-
-@app.on_event("startup")
-def _startup():
-    db_init()
-
-
-# =========================
-# Routes: Login + Scanner
-# =========================
-@app.get("/", include_in_schema=False)
-def root():
-    return RedirectResponse(url="/scanner", status_code=302)
-
-
-@app.get("/login", response_class=HTMLResponse, include_in_schema=False)
-def login_page():
-    # Simple form login page
-    return HTMLResponse(
-        f"""
 <!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{APP_NAME} — Login</title>
+  <title>Estate AI Scanner</title>
   <style>
-    body {{ font-family: Arial, sans-serif; padding: 24px; max-width: 520px; margin: 0 auto; }}
-    .card {{ border:1px solid #ddd; border-radius: 12px; padding: 16px; }}
-    input {{ width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #ccc; margin: 6px 0 12px; }}
-    button {{ width: 100%; padding: 10px; border-radius: 10px; border: 1px solid #2b7cff; background: #2b7cff; color: #fff; font-weight: 800; cursor: pointer; }}
-    .small {{ color: #666; font-size: 12px; margin-top: 10px; }}
-  </style>
-</head>
-<body>
-  <h1>{APP_NAME}</h1>
-  <div class="card">
-    <h3>Company Login</h3>
-    <form method="post" action="/login">
-      <label>Company Code</label>
-      <input name="company_code" autocomplete="username" required />
-      <label>Password</label>
-      <input name="password" type="password" autocomplete="current-password" required />
-      <button type="submit">Login</button>
-    </form>
-    <div class="small">Tip: If you get logged out, refresh and log in again.</div>
-  </div>
-</body>
-</html>
-        """.strip()
-    )
+    body { font-family: Arial, sans-serif; padding: 24px; max-width: 1100px; margin: 0 auto; }
+    h1 { margin: 0 0 6px; }
+    .sub { margin: 0 0 16px; color: #555; }
 
+    .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 10px 0 18px; }
+    button { padding: 10px 14px; border-radius: 8px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
+    button.primary { background: #2b7cff; color: #fff; border-color: #2b7cff; font-weight: 700; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
 
-@app.post("/login", include_in_schema=False)
-def login_submit(
-    request: Request,
-    company_code: str = Form(...),
-    password: str = Form(...),
-):
-    if company_code.strip() == COMPANY_CODE and password == COMPANY_PASSWORD:
-        request.session["company_code"] = company_code.strip()
-        return RedirectResponse(url="/scanner", status_code=302)
-    return HTMLResponse("<h3>Login failed</h3><p>Invalid code/password.</p><p><a href='/login'>Try again</a></p>", status_code=401)
+    .modeBox {
+      display: inline-flex;
+      gap: 10px;
+      align-items: center;
+      border: 1px solid #eee;
+      border-radius: 10px;
+      padding: 8px 10px;
+      background: #fafafa;
+      font-size: 13px;
+    }
+    .modeBox label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+    .modeNote { font-size: 12px; color: #666; margin-left: 6px; }
 
+    .grid { display: grid; grid-template-columns: 360px 1fr; gap: 18px; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
 
-@app.get("/logout", include_in_schema=False)
-def logout(request: Request):
-    request.session.clear()
-    return RedirectResponse(url="/login", status_code=302)
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 14px; background: #fff; }
+    .card h3 { margin: 0 0 10px; }
 
-
-@app.get("/scanner", response_class=HTMLResponse, include_in_schema=False)
-def scanner(request: Request):
-    # Browser-friendly: redirect if not logged in
-    if not is_logged_in(request):
-        return RedirectResponse(url="/login", status_code=302)
-
-    try:
-        with open(FRONTEND_PATH, "r", encoding="utf-8") as f:
-            html = f.read()
-        return HTMLResponse(html)
-    except Exception:
-        return HTMLResponse("<h3>Missing frontend/index.html</h3>", status_code=500)
-
-
-# =========================
-# AI prompts
-# =========================
-def build_single_prompt(max_items: int) -> str:
-    # Note about closer photo if unclear
-    return f"""
-You are an expert estate sale pricing assistant.
-
-Return ONLY valid JSON (no markdown, no code fences).
-
-Task:
-- Identify the PRIMARY item in the photo.
-- Provide an estate-sale-appropriate price range and suggested list price.
-- If multiple items appear, treat them as a bundle ONLY IF the user chose a bundle/single analysis mode (default). Otherwise focus on the primary item.
-
-Output JSON schema:
-{{
-  "title": string,
-  "category": string,
-  "condition_notes": string,
-  "price_range_low": number,
-  "price_range_high": number,
-  "suggested_list_price": number,
-  "keywords": string[],
-  "rationale": string,
-  "confidence": number,  // 0.0 to 1.0
-
-  "clarity_notes": string,            // optional: what's unclear or missing
-  "next_photo_tip": string            // optional: prompt user to take closer pic / new angle if needed
-}}
-
-Rules:
-- Use USD for pricing.
-- If the photo is unclear OR key markings/labels are missing, include "clarity_notes" and "next_photo_tip".
-- Keep it concise and practical for an estate sale team.
-""".strip()
-
-
-def build_multi_prompt(max_items: int) -> str:
-    return f"""
-You are an expert estate sale pricing assistant.
-
-Return ONLY valid JSON (no markdown, no code fences).
-
-Task:
-- Identify up to {max_items} prominent items in the photo.
-- Provide BOTH:
-  1) A BUNDLE/LOT recommendation (bundle price range + list price)
-  2) A per-item breakdown (each item priced separately)
-
-If you cannot confidently identify an item due to size/blur/angle, still list it but:
-- lower confidence
-- include clarity_notes + next_photo_tip prompting a closer photo.
-
-Output JSON schema:
-{{
-  "mode": "multi",
-  "bundle": {{
-    "title": string,
-    "price_range_low": number,
-    "price_range_high": number,
-    "suggested_list_price": number,
-    "rationale": string,
-    "confidence": number
-  }},
-  "items": [
-    {{
-      "id": number,
-      "title": string,
-      "category": string,
-      "condition_notes": string,
-      "price_range_low": number,
-      "price_range_high": number,
-      "suggested_list_price": number,
-      "keywords": string[],
-      "rationale": string,
-      "confidence": number
-    }}
-  ],
-  "recommendation": string,            // "Bundle" vs "Sell separately" guidance
-  "additional_items_seen": string[],   // optional: if more than {max_items} items exist, list titles only
-
-  "clarity_notes": string,             // optional
-  "next_photo_tip": string             // optional: prompt user to take closer pic / new angle
-}}
-
-Rules:
-- Max {max_items} items in "items".
-- Use USD.
-- Bundle pricing should usually reflect a realistic bundle discount vs selling separately.
-- If the photo is unclear or items might be missed, include "clarity_notes" and "next_photo_tip".
-""".strip()
-
-
-def image_to_data_url_bytes(image_bytes: bytes, mime: str) -> str:
-    b64 = base64.b64encode(image_bytes).decode("utf-8")
-    return f"data:{mime};base64,{b64}"
-
-
-def guess_mime(filename: str) -> str:
-    fn = (filename or "").lower()
-    if fn.endswith(".png"):
-        return "image/png"
-    if fn.endswith(".webp"):
-        return "image/webp"
-    return "image/jpeg"
-
-
-def call_openai_vision(image_bytes: bytes, filename: str, mode: str) -> Dict[str, Any]:
-    if not client:
-        raise HTTPException(status_code=500, detail="OPENAI_API_KEY not configured")
-
-    mime = guess_mime(filename)
-    data_url = image_to_data_url_bytes(image_bytes, mime)
-
-    if mode == "multi":
-        prompt = build_multi_prompt(MAX_MULTI_ITEMS)
-    else:
-        prompt = build_single_prompt(MAX_MULTI_ITEMS)
-
-    messages = [
-        {"role": "system", "content": prompt},
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": f"Analyze this photo. Mode={mode}. If anything is unclear, ask for a closer photo in next_photo_tip."},
-                {"type": "image_url", "image_url": {"url": data_url}},
-            ],
-        },
-    ]
-
-    # Ask for strict JSON
-    resp = client.chat.completions.create(
-        model=MODEL_NAME,
-        messages=messages,
-        response_format={"type": "json_object"},
-    )
-
-    text = resp.choices[0].message.content or "{}"
-    try:
-        parsed = json.loads(text)
-        return parsed
-    except Exception:
-        # Fall back: try best-effort parse
-        return {
-            "error": "Model returned invalid JSON",
-            "raw": text,
-            "confidence": 0.2,
-            "clarity_notes": "AI output could not be parsed reliably.",
-            "next_photo_tip": "Try taking a clearer, closer photo and try again.",
-        }
-
-
-# =========================
-# Analyze + History
-# =========================
-@app.post("/analyze-image")
-async def analyze_image(
-    request: Request,
-    image: UploadFile = File(...),
-    analysis_mode: str = Form("single"),  # "single" or "multi"
-):
-    company_code = require_login_json(request)
-
-    mode = (analysis_mode or "single").strip().lower()
-    if mode not in ("single", "multi"):
-        mode = "single"
-
-    img_bytes = await image.read()
-    if not img_bytes:
-        raise HTTPException(status_code=400, detail="Empty upload")
-
-    # Save image to disk
-    ext = os.path.splitext(image.filename or "")[1].lower()
-    if ext not in (".jpg", ".jpeg", ".png", ".webp"):
-        ext = ".jpg"
-    fname = f"{uuid4().hex}{ext}"
-    img_path = os.path.join(UPLOAD_DIR, fname)
-    with open(img_path, "wb") as f:
-        f.write(img_bytes)
-
-    # AI analysis
-    result = call_openai_vision(img_bytes, image.filename or "image.jpg", mode)
-
-    # Store scan
-    created_at = utc_now_iso()
-    conn = db_connect()
-    cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO scans(company_code, created_at, image_path, result_json) VALUES (?, ?, ?, ?)",
-        (company_code, created_at, img_path, json.dumps(result)),
-    )
-    scan_id = cur.lastrowid
-    conn.commit()
-    conn.close()
-
-    return {
-        "scan_id": scan_id,
-        "created_at": created_at,
-        "company_code": company_code,
-        "result": result,
+    .previewStrip { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .previewThumb {
+      width: 72px; height: 72px;
+      object-fit: cover;
+      border-radius: 8px;
+      border: 1px solid #eee;
+      background: #f7f7f7;
     }
 
+    #preview {
+      width: 100%;
+      max-height: 520px;
+      object-fit: contain;
+      border-radius: 10px;
+      border: 1px solid #eee;
+      display: none;
+    }
 
-@app.get("/history")
-def history(request: Request, limit: int = 25):
-    company_code = require_login_json(request)
+    .status { margin: 8px 0 0; color: #666; font-size: 13px; }
+    .ok { color: #0a7a0a; font-weight: 700; }
+    .err { color: #b00020; font-weight: 700; }
 
-    limit = max(1, min(int(limit or 25), 100))
-    conn = db_connect()
-    cur = conn.cursor()
-    cur.execute(
-        "SELECT id, created_at, image_path, result_json FROM scans WHERE company_code=? ORDER BY id DESC LIMIT ?",
-        (company_code, limit),
-    )
-    rows = cur.fetchall()
-    conn.close()
+    .resultLine { margin: 6px 0; line-height: 1.25; }
+    .label { font-weight: 800; }
 
-    items = []
-    for r in rows:
-        scan_id = int(r["id"])
-        created_at = r["created_at"]
-        try:
-            result_obj = json.loads(r["result_json"])
-        except Exception:
-            result_obj = {"error": "Corrupt result_json", "confidence": 0.1}
+    .historyList { display: flex; flex-direction: column; gap: 10px; }
+    .historyItem {
+      display: grid;
+      grid-template-columns: 72px 1fr;
+      gap: 10px;
+      align-items: center;
+      border: 1px solid #eee;
+      border-radius: 10px;
+      padding: 8px;
+      cursor: pointer;
+    }
+    .historyItem:hover { background: #fafafa; }
 
-        title = extract_title_for_history(result_obj)
-        items.append(
-            {
-                "scan_id": scan_id,
-                "created_at": created_at,
-                "title": title,
-                "image_url": f"/history/{scan_id}/image",
-                "result": result_obj,
-            }
-        )
+    .thumb {
+      width: 72px; height: 72px;
+      object-fit: cover;
+      border-radius: 8px;
+      border: 1px solid #eee;
+      display: block;
+      background: #f7f7f7;
+      pointer-events: none;
+    }
+    .thumbPlaceholder {
+      width: 72px; height: 72px;
+      border-radius: 8px;
+      border: 1px solid #eee;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #f7f7f7;
+      color: #777;
+      font-size: 12px;
+      user-select: none;
+      pointer-events: none;
+    }
 
-    return {"items": items}
+    .historyMeta { font-size: 13px; color: #444; }
+    .historyMeta .title { font-weight: 800; color: #111; margin-bottom: 2px; }
+    .historyMeta .time { color: #666; font-size: 12px; }
 
+    .badge {
+      display: inline-block;
+      font-size: 11px;
+      color: #2b7cff;
+      background: rgba(43, 124, 255, 0.10);
+      border: 1px solid rgba(43, 124, 255, 0.25);
+      padding: 2px 6px;
+      border-radius: 999px;
+      margin-top: 6px;
+    }
 
-@app.get("/history/{scan_id}/image", include_in_schema=False)
-def history_image(request: Request, scan_id: int):
-    company_code = require_login_json(request)
+    .historyItem.selected {
+      border-color: #2b7cff;
+      box-shadow: 0 0 0 2px rgba(43, 124, 255, 0.18);
+      background: #f4f8ff;
+    }
 
-    conn = db_connect()
-    cur = conn.cursor()
-    cur.execute("SELECT image_path, company_code FROM scans WHERE id=?", (scan_id,))
-    row = cur.fetchone()
-    conn.close()
+    .confWrap { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 10px 0 6px; }
+    .confPill {
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+      border-radius: 999px;
+      padding: 3px 10px;
+      font-size: 12px;
+      border: 1px solid #ddd;
+      background: #f7f7f7;
+      color: #333;
+    }
+    .confPill strong { font-weight: 800; }
+    .confHigh { border-color: rgba(10, 122, 10, 0.35); background: rgba(10, 122, 10, 0.08); color: #0a7a0a; }
+    .confMed  { border-color: rgba(176, 112, 0, 0.35); background: rgba(176, 112, 0, 0.08); color: #7a4a00; }
+    .confLow  { border-color: rgba(176, 0, 32, 0.30); background: rgba(176, 0, 32, 0.06); color: #b00020; }
 
-    if not row:
-        raise HTTPException(status_code=404, detail="Not found")
-    if row["company_code"] != company_code:
-        raise HTTPException(status_code=403, detail="Forbidden")
+    .tipBox {
+      font-size: 12px;
+      color: #555;
+      background: #fafafa;
+      border: 1px solid #eee;
+      border-radius: 10px;
+      padding: 10px;
+      margin: 10px 0 0;
+    }
+    .tipBox ul { margin: 6px 0 0 18px; }
 
-    path = row["image_path"]
-    if not os.path.isfile(path):
-        raise HTTPException(status_code=404, detail="File missing")
+    .qaBox { margin-top: 12px; }
+    .qaItem { border: 1px solid #eee; border-radius: 10px; padding: 10px; margin-top: 8px; }
+    .qaQ { font-weight: 800; margin-bottom: 6px; }
+    .qaWhy { color: #666; font-size: 12px; margin-top: 6px; }
+    .qaBtns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+    .qaBtns button { padding: 8px 10px; border-radius: 10px; font-size: 12px; }
+    .qaBtns button.selected { border-color: #2b7cff; box-shadow: 0 0 0 2px rgba(43, 124, 255, 0.15); background: #f4f8ff; }
 
-    return FileResponse(path)
+    .sectionTitle { margin-top: 14px; font-weight: 900; }
+    .miniCard {
+      border: 1px solid #eee;
+      border-radius: 10px;
+      padding: 10px;
+      margin-top: 8px;
+      cursor: pointer;
+      background: #fff;
+    }
+    .miniCard:hover { background: #fafafa; }
+    .miniCard.selected { border-color: #2b7cff; background: #f4f8ff; }
+    .miniTitle { font-weight: 900; margin-bottom: 4px; }
+
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #f7f7f7;
+      border: 1px solid #eee;
+      padding: 10px;
+      border-radius: 10px;
+      margin: 10px 0 0;
+    }
+
+    .small { font-size: 12px; color: #666; margin-top: 10px; }
+  </style>
+</head>
+
+<body>
+  <h1>Estate AI Scanner</h1>
+  <p class="sub" id="subtitle">Snap a photo, identify the item(s), and get an estimate.</p>
+
+  <!-- Capture inputs -->
+  <input id="cameraInput" type="file" accept="image/*" capture="environment" style="display:none" />
+  <input id="galleryInput" type="file" accept="image/*" style="display:none" />
+  <input id="extraInput" type="file" accept="image/*" style="display:none" />
+
+  <div class="controls">
+    <button onclick="openCamera()">Use Camera</button>
+    <button onclick="openGallery()">Choose From Photos</button>
+    <button onclick="addDetailPhoto()">Add Detail Photo</button>
+
+    <span class="modeBox">
+      <span style="font-weight:800;">Analyze as:</span>
+      <label><input type="radio" name="mode" value="single" checked /> Single / Bundle</label>
+      <label><input type="radio" name="mode" value="multi" /> Multiple items</label>
+      <span class="modeNote">(multi max 8)</span>
+    </span>
+
+    <button id="analyzeBtn" class="primary" onclick="analyze()">Analyze</button>
+    <button onclick="refreshTeamHistory()">Refresh Team History</button>
+    <button onclick="clearLocalHistory()">Clear Local History</button>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h3>Preview</h3>
+      <img id="preview" alt="Preview" />
+      <div id="previewHint" class="status">Select a photo to begin.</div>
+      <div id="previewStrip" class="previewStrip"></div>
+
+      <div class="small">
+        Tip: For antiques/crystal/china, add a close-up of the backstamp/marking. If results miss items or are unclear, take a closer photo with better lighting.
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Result</h3>
+      <div id="status" class="status"></div>
+      <div id="result"></div>
+    </div>
+
+    <div class="card" style="grid-column: 1 / -1;">
+      <h3>Team History (shared)</h3>
+      <div id="teamHistory" class="historyList"></div>
+      <div id="teamEmpty" class="status">No team scans yet.</div>
+    </div>
+
+    <div class="card" style="grid-column: 1 / -1;">
+      <h3>Local History (this device)</h3>
+      <div id="history" class="historyList"></div>
+      <div id="historyEmpty" class="status">No local scans saved yet.</div>
+      <div class="small">Local history stores results only (no photos) to avoid storage limits.</div>
+    </div>
+  </div>
+
+  <script>
+    const cameraInput = document.getElementById("cameraInput");
+    const galleryInput = document.getElementById("galleryInput");
+    const extraInput = document.getElementById("extraInput");
+
+    const preview = document.getElementById("preview");
+    const previewHint = document.getElementById("previewHint");
+    const previewStrip = document.getElementById("previewStrip");
+
+    const statusEl = document.getElementById("status");
+    const resultEl = document.getElementById("result");
+    const analyzeBtn = document.getElementById("analyzeBtn");
+
+    const historyEl = document.getElementById("history");
+    const historyEmptyEl = document.getElementById("historyEmpty");
+    const teamHistoryEl = document.getElementById("teamHistory");
+    const teamEmptyEl = document.getElementById("teamEmpty");
+
+    const LOCAL_HISTORY_KEY = "estate_ai_local_history_v1";
+    const LOCAL_HISTORY_LIMIT = 25;
+
+    let selectedFiles = [];     // supports multiple photos per scan
+    let selectedUrls = [];      // object URLs for preview thumbnails
+    let lastScanId = null;      // for refine
+
+    function escapeHtml(str) {
+      return String(str ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+    function nowIso() { return new Date().toISOString(); }
+    function formatTime(iso) { try { return new Date(iso).toLocaleString(); } catch { return iso; } }
+    function stripCodeFences(s) { return String(s ?? "").replace(/```json|```/gi, "").trim(); }
+
+    async function readJsonOrText(resp) {
+      const ct = resp.headers.get("content-type") || "";
+      if (ct.includes("application/json")) return await resp.json();
+      const text = await resp.text();
+      try { return JSON.parse(stripCodeFences(text)); } catch { return { detail: text }; }
+    }
+
+    function extractResult(payload) {
+      if (payload && typeof payload === "object" && payload.result && typeof payload.result === "object") return payload.result;
+      return payload;
+    }
+
+    function fmtUsd(n) {
+      const num = Number(n);
+      if (!isFinite(num)) return "";
+      try {
+        return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(num);
+      } catch {
+        return `$${Math.round(num)}`;
+      }
+    }
+
+    function getSelectedMode() {
+      const el = document.querySelector('input[name="mode"]:checked');
+      return el ? el.value : "single";
+    }
+
+    // -------------------------
+    // Local history (text only)
+    // -------------------------
+    function readLocalHistory() {
+      try {
+        const raw = localStorage.getItem(LOCAL_HISTORY_KEY);
+        return raw ? JSON.parse(raw) : [];
+      } catch {
+        return [];
+      }
+    }
+    function writeLocalHistory(items) {
+      localStorage.setItem(LOCAL_HISTORY_KEY, JSON.stringify(items));
+    }
+    function addToLocalHistory(entry) {
+      const items = readLocalHistory();
+      items.unshift(entry);
+      writeLocalHistory(items.slice(0, LOCAL_HISTORY_LIMIT));
+      renderLocalHistory();
+    }
+    function clearLocalHistory() {
+      localStorage.removeItem(LOCAL_HISTORY_KEY);
+      renderLocalHistory();
+      statusEl.textContent = "";
+      resultEl.innerHTML = "";
+      preview.style.display = "none";
+      previewHint.textContent = "Local history cleared.";
+      clearSelected();
+    }
+
+    // -------------------------
+    // Selection / preview
+    // -------------------------
+    function clearSelected() {
+      selectedFiles = [];
+      selectedUrls.forEach(u => URL.revokeObjectURL(u));
+      selectedUrls = [];
+      previewStrip.innerHTML = "";
+    }
+
+    function renderPreviewStrip() {
+      previewStrip.innerHTML = "";
+      selectedUrls.forEach((u, i) => {
+        const img = document.createElement("img");
+        img.className = "previewThumb";
+        img.src = u;
+        img.title = `Photo ${i+1}`;
+        previewStrip.appendChild(img);
+      });
+    }
+
+    function setMainPreviewFromFirst() {
+      if (!selectedUrls.length) {
+        preview.style.display = "none";
+        return;
+      }
+      preview.src = selectedUrls[0];
+      preview.style.display = "block";
+    }
+
+    function handleAddFiles(files) {
+      if (!files || !files.length) return;
+
+      for (const f of files) {
+        if (selectedFiles.length >= 4) break; // matches backend default MAX_PHOTOS_PER_SCAN
+        selectedFiles.push(f);
+        const u = URL.createObjectURL(f);
+        selectedUrls.push(u);
+      }
+
+      setMainPreviewFromFirst();
+      renderPreviewStrip();
+
+      previewHint.textContent = selectedFiles.length > 1
+        ? `Ready to analyze (${selectedFiles.length} photos).`
+        : "Ready to analyze.";
+
+      statusEl.textContent = "";
+      resultEl.innerHTML = "";
+    }
+
+    function openCamera() { cameraInput.value = ""; cameraInput.click(); }
+    function openGallery() { galleryInput.value = ""; galleryInput.click(); }
+    function addDetailPhoto() { extraInput.value = ""; extraInput.click(); }
+
+    cameraInput.addEventListener("change", () => handleAddFiles(cameraInput.files));
+    galleryInput.addEventListener("change", () => { clearSelected(); handleAddFiles(galleryInput.files); });
+    extraInput.addEventListener("change", () => handleAddFiles(extraInput.files));
+
+    // -------------------------
+    // Confidence + tips + questions
+    // -------------------------
+    function confidenceBadge(conf) {
+      if (typeof conf !== "number" || !isFinite(conf)) return "";
+      const pct = Math.max(0, Math.min(100, Math.round(conf * 100)));
+      let label = "Medium", cls = "confMed";
+      if (pct >= 75) { label = "High"; cls = "confHigh"; }
+      else if (pct < 45) { label = "Low"; cls = "confLow"; }
+      return `
+        <div class="confWrap">
+          <div class="confPill ${cls}">
+            <strong>Confidence</strong>
+            <span>${escapeHtml(String(pct))}%</span>
+            <span>(${escapeHtml(label)})</span>
+          </div>
+        </div>
+      `;
+    }
+
+    function tipBoxFromClarity(clarityNotes, nextTip) {
+      const cn = (clarityNotes || "").trim();
+      const nt = (nextTip || "").trim();
+      if (!cn && !nt) return "";
+      return `
+        <div class="tipBox">
+          ${cn ? `<div><strong>Clarity notes:</strong> ${escapeHtml(cn)}</div>` : ""}
+          ${nt ? `<div style="margin-top:6px;"><strong>Try this:</strong> ${escapeHtml(nt)}</div>` : ""}
+          <ul>
+            <li>Get closer to labels / maker marks</li>
+            <li>Reduce glare and improve lighting</li>
+            <li>Take a second angle if needed</li>
+          </ul>
+        </div>
+      `;
+    }
+
+    function renderWhatToCheck(what) {
+      if (!Array.isArray(what) || !what.length) return "";
+      const lis = what.map(x => `
+        <li>
+          <strong>${escapeHtml(x.label || "")}</strong><br/>
+          <span>${escapeHtml(x.why_it_matters || "")}</span><br/>
+          <em>${escapeHtml(x.how_to_check || "")}</em>
+        </li>
+      `).join("");
+      return `
+        <div class="tipBox">
+          <div style="font-weight:900; margin-bottom:6px;">What to check next</div>
+          <ul>${lis}</ul>
+        </div>
+      `;
+    }
+
+    let pendingAnswers = {}; // {question_id: "Yes|No|Not sure"}
+
+    function renderQuestions(questions) {
+      pendingAnswers = {};
+      if (!Array.isArray(questions) || !questions.length) return "";
+
+      const blocks = questions.map(q => {
+        const qid = q.id || "";
+        const answers = Array.isArray(q.answers) ? q.answers : ["Yes","No","Not sure"];
+        return `
+          <div class="qaItem" data-qid="${escapeHtml(qid)}">
+            <div class="qaQ">${escapeHtml(q.question || "")}</div>
+            <div class="qaBtns">
+              ${answers.map(a => `<button type="button" data-answer="${escapeHtml(a)}">${escapeHtml(a)}</button>`).join("")}
+            </div>
+            ${q.why ? `<div class="qaWhy">${escapeHtml(q.why)}</div>` : ""}
+          </div>
+        `;
+      }).join("");
+
+      return `
+        <div class="qaBox">
+          <div style="font-weight:900;">Quick questions (improves pricing)</div>
+          ${blocks}
+          <div style="margin-top:10px;">
+            <button class="primary" type="button" onclick="refineWithAnswers()">Refine with answers</button>
+            <span class="modeNote">Tip: Add a detail photo (mark/stamp) before refining if you can.</span>
+          </div>
+        </div>
+      `;
+    }
+
+    function wireQuestionButtons(container) {
+      const items = Array.from(container.querySelectorAll(".qaItem"));
+      items.forEach(item => {
+        const qid = item.getAttribute("data-qid") || "";
+        const btns = Array.from(item.querySelectorAll("button[data-answer]"));
+        btns.forEach(btn => {
+          btn.addEventListener("click", () => {
+            btns.forEach(b => b.classList.remove("selected"));
+            btn.classList.add("selected");
+            pendingAnswers[qid] = btn.getAttribute("data-answer") || "";
+          });
+        });
+      });
+    }
+
+    // -------------------------
+    // Render result (single + multi)
+    // -------------------------
+    function renderSingle(data) {
+      const title = (data.title ?? "").trim();
+      const category = (data.category ?? "").trim();
+      const condition = (data.condition_notes ?? "").trim();
+      const low = (data.price_range_low != null) ? Number(data.price_range_low) : null;
+      const high = (data.price_range_high != null) ? Number(data.price_range_high) : null;
+      const listPrice = (data.suggested_list_price != null) ? Number(data.suggested_list_price) : null;
+      const keywords = Array.isArray(data.keywords) ? data.keywords.filter(Boolean) : [];
+      const rationale = String(data.rationale ?? "").trim();
+
+      const rangeStr = (isFinite(low) && isFinite(high)) ? `${fmtUsd(low)} – ${fmtUsd(high)}` : "";
+      const listStr = isFinite(listPrice) ? fmtUsd(listPrice) : "";
+
+      resultEl.innerHTML = `
+        <div class="resultLine"><span class="label">Item:</span> ${escapeHtml(title || "Unknown item")}</div>
+        ${category ? `<div class="resultLine"><span class="label">Category:</span> ${escapeHtml(category)}</div>` : ""}
+        ${condition ? `<div class="resultLine"><span class="label">Condition Notes:</span> ${escapeHtml(condition)}</div>` : ""}
+        ${rangeStr ? `<div class="resultLine"><span class="label">Estimated Value Range:</span> ${escapeHtml(rangeStr)}</div>` : ""}
+        ${listStr ? `<div class="resultLine"><span class="label">Suggested Listing Price:</span> ${escapeHtml(listStr)}</div>` : ""}
+        ${confidenceBadge(data.confidence)}
+        ${keywords.length ? `<div class="resultLine"><span class="label">Keywords:</span> ${escapeHtml(keywords.join(", "))}</div>` : ""}
+        ${rationale ? `<div class="resultLine" style="margin-top:10px;"><span class="label">Rationale:</span><pre>${escapeHtml(rationale)}</pre></div>` : ""}
+        ${renderWhatToCheck(data.what_to_check)}
+        ${renderQuestions(data.followup_questions)}
+        ${tipBoxFromClarity(data.clarity_notes, data.next_photo_tip)}
+      `;
+
+      wireQuestionButtons(resultEl);
+    }
+
+    function renderMulti(data) {
+      const bundle = data.bundle || {};
+      const items = Array.isArray(data.items) ? data.items : [];
+      const recommendation = String(data.recommendation ?? "").trim();
+      const extras = Array.isArray(data.additional_items_seen) ? data.additional_items_seen : [];
+
+      const bTitle = String(bundle.title ?? "Bundle").trim();
+      const bLow = (bundle.price_range_low != null) ? Number(bundle.price_range_low) : null;
+      const bHigh = (bundle.price_range_high != null) ? Number(bundle.price_range_high) : null;
+      const bList = (bundle.suggested_list_price != null) ? Number(bundle.suggested_list_price) : null;
+      const bRange = (isFinite(bLow) && isFinite(bHigh)) ? `${fmtUsd(bLow)} – ${fmtUsd(bHigh)}` : "";
+      const bListStr = isFinite(bList) ? fmtUsd(bList) : "";
+      const bRat = String(bundle.rationale ?? "").trim();
+
+      const itemCards = items.map((it, idx) => {
+        const t = String(it.title ?? `Item ${idx+1}`).trim();
+        const low = (it.price_range_low != null) ? Number(it.price_range_low) : null;
+        const high = (it.price_range_high != null) ? Number(it.price_range_high) : null;
+        const lp = (it.suggested_list_price != null) ? Number(it.suggested_list_price) : null;
+        const range = (isFinite(low) && isFinite(high)) ? `${fmtUsd(low)}–${fmtUsd(high)}` : "";
+        const price = isFinite(lp) ? fmtUsd(lp) : "";
+        return `
+          <div class="miniCard" data-idx="${idx}">
+            <div class="miniTitle">${escapeHtml(t)}</div>
+            <div>${escapeHtml(range)} ${price ? " • " + escapeHtml(price) : ""}</div>
+          </div>
+        `;
+      }).join("");
+
+      resultEl.innerHTML = `
+        <div class="sectionTitle">Bundle / Lot</div>
+        <div class="resultLine"><span class="label">Title:</span> ${escapeHtml(bTitle)}</div>
+        ${bRange ? `<div class="resultLine"><span class="label">Bundle Value Range:</span> ${escapeHtml(bRange)}</div>` : ""}
+        ${bListStr ? `<div class="resultLine"><span class="label">Bundle List Price:</span> ${escapeHtml(bListStr)}</div>` : ""}
+        ${confidenceBadge(bundle.confidence)}
+        ${recommendation ? `<div class="resultLine"><span class="label">Recommendation:</span> ${escapeHtml(recommendation)}</div>` : ""}
+        ${bRat ? `<div class="resultLine" style="margin-top:10px;"><span class="label">Bundle Rationale:</span><pre>${escapeHtml(bRat)}</pre></div>` : ""}
+
+        <div class="sectionTitle">Items (up to 8)</div>
+        ${items.length ? itemCards : `<div class="status">No individual items were returned.</div>`}
+
+        ${extras.length ? `
+          <div class="tipBox">
+            <div><strong>More items may be visible:</strong></div>
+            <div style="margin-top:6px;">${escapeHtml(extras.join(", "))}</div>
+            <div style="margin-top:8px;"><strong>Tip:</strong> Take a closer photo of missing items for individual pricing.</div>
+          </div>
+        ` : ""}
+
+        <div id="multiDetail"></div>
+
+        ${renderWhatToCheck(data.what_to_check)}
+        ${renderQuestions(data.followup_questions)}
+        ${tipBoxFromClarity(data.clarity_notes, data.next_photo_tip)}
+      `;
+
+      wireQuestionButtons(resultEl);
+
+      const detailEl = document.getElementById("multiDetail");
+      const cards = Array.from(resultEl.querySelectorAll(".miniCard"));
+
+      function showDetail(idx) {
+        cards.forEach(c => c.classList.remove("selected"));
+        const card = cards[idx];
+        if (card) card.classList.add("selected");
+
+        const it = items[idx] || {};
+        const t = String(it.title ?? "Item").trim();
+        const cat = String(it.category ?? "").trim();
+        const cond = String(it.condition_notes ?? "").trim();
+        const low = (it.price_range_low != null) ? Number(it.price_range_low) : null;
+        const high = (it.price_range_high != null) ? Number(it.price_range_high) : null;
+        const lp = (it.suggested_list_price != null) ? Number(it.suggested_list_price) : null;
+        const range = (isFinite(low) && isFinite(high)) ? `${fmtUsd(low)} – ${fmtUsd(high)}` : "";
+        const price = isFinite(lp) ? fmtUsd(lp) : "";
+        const kw = Array.isArray(it.keywords) ? it.keywords.filter(Boolean) : [];
+        const rat = String(it.rationale ?? "").trim();
+
+        detailEl.innerHTML = `
+          <div class="sectionTitle">Selected Item</div>
+          <div class="resultLine"><span class="label">Item:</span> ${escapeHtml(t)}</div>
+          ${cat ? `<div class="resultLine"><span class="label">Category:</span> ${escapeHtml(cat)}</div>` : ""}
+          ${cond ? `<div class="resultLine"><span class="label">Condition Notes:</span> ${escapeHtml(cond)}</div>` : ""}
+          ${range ? `<div class="resultLine"><span class="label">Value Range:</span> ${escapeHtml(range)}</div>` : ""}
+          ${price ? `<div class="resultLine"><span class="label">List Price:</span> ${escapeHtml(price)}</div>` : ""}
+          ${confidenceBadge(it.confidence)}
+          ${kw.length ? `<div class="resultLine"><span class="label">Keywords:</span> ${escapeHtml(kw.join(", "))}</div>` : ""}
+          ${rat ? `<div class="resultLine" style="margin-top:10px;"><span class="label">Rationale:</span><pre>${escapeHtml(rat)}</pre></div>` : ""}
+        `;
+      }
+
+      cards.forEach(c => {
+        c.addEventListener("click", () => showDetail(Number(c.dataset.idx)));
+        c.addEventListener("touchend", (e) => { e.preventDefault(); showDetail(Number(c.dataset.idx)); }, { passive: false });
+      });
+
+      if (items.length) showDetail(0);
+    }
+
+    function renderResult(payloadOrResult) {
+      const data = extractResult(payloadOrResult);
+
+      if (!data || typeof data !== "object") {
+        resultEl.innerHTML = `<pre>${escapeHtml(String(data))}</pre>`;
+        return;
+      }
+      if (data.error) {
+        statusEl.innerHTML = `<span class="err">Error:</span> ${escapeHtml(data.error)}`;
+        if (data.raw) resultEl.innerHTML = `<pre>${escapeHtml(data.raw)}</pre>`;
+        return;
+      }
+
+      if (data.mode === "multi") renderMulti(data);
+      else renderSingle(data);
+    }
+
+    // -------------------------
+    // Refine flow
+    // -------------------------
+    async function refineWithAnswers() {
+      if (!lastScanId) {
+        statusEl.innerHTML = `<span class="err">No scan to refine.</span>`;
+        return;
+      }
+
+      // only send answered questions
+      const answers = {};
+      Object.keys(pendingAnswers || {}).forEach(k => {
+        if (pendingAnswers[k]) answers[k] = pendingAnswers[k];
+      });
+
+      analyzeBtn.disabled = true;
+      statusEl.textContent = "Refining…";
+
+      const formData = new FormData();
+      formData.append("scan_id", String(lastScanId));
+      formData.append("answers_json", JSON.stringify(answers));
+
+      // Optional: if user added extra detail photos after the scan,
+      // we can send current selectedFiles as extra_images, BUT that would resend originals too.
+      // Keep it simple: do not auto-send; users can re-run Analyze with more photos.
+      // (You can enhance later.)
+
+      try {
+        const resp = await fetch("/refine", { method: "POST", body: formData });
+        if (resp.status === 401) { window.location.href = "/login"; return; }
+        const payload = await readJsonOrText(resp);
+        if (!resp.ok) throw new Error(payload?.detail || "Refine failed");
+
+        statusEl.innerHTML = `<span class="ok">Updated ✅</span>`;
+        lastScanId = payload.scan_id || lastScanId;
+        renderResult(payload);
+
+        await refreshTeamHistory();
+        resultEl.scrollIntoView({ behavior: "smooth", block: "start" });
+
+      } catch (e) {
+        statusEl.innerHTML = `<span class="err">Error:</span> ${escapeHtml(e.message)}`;
+      } finally {
+        analyzeBtn.disabled = false;
+      }
+    }
+
+    // -------------------------
+    // History rendering
+    // -------------------------
+    function renderLocalHistory() {
+      const items = readLocalHistory();
+      historyEl.innerHTML = "";
+
+      if (!items.length) { historyEmptyEl.style.display = "block"; return; }
+      historyEmptyEl.style.display = "none";
+
+      items.forEach((item, idx) => {
+        const r = item?.result || {};
+        const title =
+          (r.mode === "multi" ? (r.bundle?.title || "Multi-item lot") : (r.title || "Unknown item"));
+        const time = item?.created_at ? formatTime(item.created_at) : "";
+
+        const price =
+          (r.mode === "multi"
+            ? (r.bundle?.suggested_list_price != null ? fmtUsd(r.bundle.suggested_list_price) : "")
+            : (r?.suggested_list_price != null ? fmtUsd(r.suggested_list_price) : "")
+          );
+
+        const range =
+          (r.mode === "multi"
+            ? (r.bundle?.price_range_low != null && r.bundle?.price_range_high != null
+                ? `${fmtUsd(r.bundle.price_range_low)}–${fmtUsd(r.bundle.price_range_high)}`
+                : "")
+            : (r?.price_range_low != null && r?.price_range_high != null
+                ? `${fmtUsd(r.price_range_low)}–${fmtUsd(r.price_range_high)}`
+                : "")
+          );
+
+        const div = document.createElement("div");
+        div.className = "historyItem";
+        div.onclick = () => openLocalHistoryItem(idx);
+
+        div.innerHTML = `
+          <div class="thumbPlaceholder">No image</div>
+          <div class="historyMeta">
+            <div class="title">${escapeHtml(String(title))}</div>
+            <div>${escapeHtml(range)} ${price ? " • " + escapeHtml(price) : ""}</div>
+            <div class="time">${escapeHtml(time)}</div>
+          </div>
+        `;
+        historyEl.appendChild(div);
+      });
+    }
+
+    function openLocalHistoryItem(index) {
+      const items = readLocalHistory();
+      const item = items[index];
+      if (!item) return;
+
+      lastScanId = null;
+      statusEl.innerHTML = `<span class="ok">Loaded ✅</span>`;
+      renderResult(item.result);
+      resultEl.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    function renderTeamHistory(items) {
+      teamHistoryEl.innerHTML = "";
+      if (!items || !items.length) { teamEmptyEl.style.display = "block"; return; }
+      teamEmptyEl.style.display = "none";
+
+      items.forEach((item) => {
+        const r = item?.result || {};
+        const title =
+          (r.mode === "multi" ? (r.bundle?.title || item.title || "Multi-item lot") : (r.title || item.title || "Unknown item"));
+        const time = item?.created_at ? formatTime(item.created_at) : "";
+
+        const price =
+          (r.mode === "multi"
+            ? (r.bundle?.suggested_list_price != null ? fmtUsd(r.bundle.suggested_list_price) : "")
+            : (r?.suggested_list_price != null ? fmtUsd(r.suggested_list_price) : "")
+          );
+
+        const range =
+          (r.mode === "multi"
+            ? (r.bundle?.price_range_low != null && r.bundle?.price_range_high != null
+                ? `${fmtUsd(r.bundle.price_range_low)}–${fmtUsd(r.bundle.price_range_high)}`
+                : "")
+            : (r?.price_range_low != null && r?.price_range_high != null
+                ? `${fmtUsd(r.price_range_low)}–${fmtUsd(r.price_range_high)}`
+                : "")
+          );
+
+        const imgSrc = item.image_url || "";
+
+        const div = document.createElement("div");
+        div.className = "historyItem";
+
+        div.innerHTML = `
+          ${imgSrc ? `<img class="thumb" src="${escapeHtml(imgSrc)}" alt="thumb" />` : `<div class="thumbPlaceholder">No image</div>`}
+          <div class="historyMeta">
+            <div class="title">${escapeHtml(String(title))}</div>
+            <div>${escapeHtml(range)} ${price ? " • " + escapeHtml(price) : ""}</div>
+            <div class="time">${escapeHtml(time)}</div>
+            <div class="badge">Shared with your team</div>
+          </div>
+        `;
+
+        const onSelect = () => {
+          teamHistoryEl.querySelectorAll(".historyItem.selected").forEach(el => el.classList.remove("selected"));
+          div.classList.add("selected");
+
+          lastScanId = item.scan_id || null;
+
+          if (imgSrc) {
+            preview.src = imgSrc;
+            preview.style.display = "block";
+            previewHint.textContent = "Loaded from team history.";
+          }
+
+          statusEl.innerHTML = `<span class="ok">Loaded ✅</span>`;
+          renderResult(item.result);
+          resultEl.scrollIntoView({ behavior: "smooth", block: "start" });
+        };
+
+        div.addEventListener("click", onSelect);
+        div.addEventListener("touchend", (e) => { e.preventDefault(); onSelect(); }, { passive: false });
+
+        teamHistoryEl.appendChild(div);
+      });
+    }
+
+    async function refreshTeamHistory() {
+      try {
+        const resp = await fetch("/history?limit=25");
+        if (resp.status === 401) { window.location.href = "/login"; return; }
+        if (!resp.ok) return;
+        const data = await resp.json();
+        renderTeamHistory(data.items || []);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    // -------------------------
+    // Analyze
+    // -------------------------
+    async function analyze() {
+      if (!selectedFiles.length) {
+        statusEl.innerHTML = `<span class="err">Select a photo first.</span>`;
+        return;
+      }
+
+      analyzeBtn.disabled = true;
+      statusEl.textContent = "Analyzing…";
+      resultEl.innerHTML = "";
+
+      const formData = new FormData();
+      // Backend expects repeated "images"
+      selectedFiles.forEach(f => formData.append("images", f));
+      formData.append("analysis_mode", getSelectedMode());
+
+      try {
+        const resp = await fetch("/analyze-image", { method: "POST", body: formData });
+        if (resp.status === 401) { window.location.href = "/login"; return; }
+
+        const payload = await readJsonOrText(resp);
+        if (!resp.ok) throw new Error(payload?.detail || "Analyze failed");
+
+        statusEl.innerHTML = `<span class="ok">Done ✅</span>`;
+        lastScanId = payload.scan_id || null;
+
+        renderResult(payload);
+
+        const r = extractResult(payload);
+        if (r && typeof r === "object" && !r.error) {
+          addToLocalHistory({ created_at: payload.created_at || nowIso(), result: r });
+        }
+
+        await refreshTeamHistory();
+        resultEl.scrollIntoView({ behavior: "smooth", block: "start" });
+
+      } catch (e) {
+        statusEl.innerHTML = `<span class="err">Error:</span> ${escapeHtml(e.message)}`;
+      } finally {
+        analyzeBtn.disabled = false;
+      }
+    }
+
+    // Init
+    renderLocalHistory();
+    refreshTeamHistory();
+  </script>
+</body>
+</html>
