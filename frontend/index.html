@@ -7,17 +7,19 @@
 
 <style>
   body { font-family: Arial, sans-serif; padding: 16px; max-width: 1100px; margin: 0 auto; }
-  h1 { margin-bottom: 6px; }
-  .sub { color: #555; margin-bottom: 16px; }
+  h1 { margin: 0 0 6px; }
+  .sub { color: #555; margin: 0 0 16px; }
 
   .controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; align-items: center; }
   button { padding: 8px 12px; border-radius: 8px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
-  button.primary { background: #2b7cff; color: #fff; border-color: #2b7cff; font-weight: bold; }
+  button.primary { background: #2b7cff; color: #fff; border-color: #2b7cff; font-weight: 700; }
+  button:disabled { opacity: .6; cursor: not-allowed; }
 
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
 
   .card { border: 1px solid #ddd; border-radius: 12px; padding: 12px; background: #fff; }
+  .card h3 { margin: 0 0 10px; }
 
   #previewContainer {
     width: 100%;
@@ -33,20 +35,24 @@
   #preview { max-width: 100%; max-height: 420px; object-fit: contain; }
 
   .previewStrip { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
-  .previewThumb { width: 60px; height: 60px; object-fit: cover; border-radius: 6px; border: 1px solid #ddd; }
+  .previewThumb {
+    width: 60px; height: 60px; object-fit: cover;
+    border-radius: 8px; border: 2px solid transparent;
+    cursor: pointer;
+  }
+  .previewThumb.active { border-color: #2b7cff; }
 
-  .status { margin-top: 8px; }
-  .ok { color: #0a7a0a; font-weight: bold; }
-  .err { color: #b00020; font-weight: bold; }
-
-  pre { white-space: pre-wrap; word-break: break-word; background: #f7f7f7; border: 1px solid #eee; padding: 10px; border-radius: 10px; }
+  .status { margin-top: 8px; font-size: 14px; }
+  .ok { color: #0a7a0a; font-weight: 800; }
+  .err { color: #b00020; font-weight: 800; }
 
   .tipBox {
     margin-top: 14px;
     font-size: 13px;
     background: #f6f6f6;
-    padding: 8px;
-    border-radius: 8px;
+    padding: 10px;
+    border-radius: 10px;
+    line-height: 1.35;
   }
 
   .modeBox {
@@ -58,6 +64,59 @@
     padding: 6px 10px;
     background: #fafafa;
     font-size: 13px;
+  }
+
+  /* Result cards */
+  .resultWrap { display: flex; flex-direction: column; gap: 12px; }
+  .itemCard {
+    border: 1px solid #eee;
+    border-radius: 12px;
+    padding: 12px;
+    background: #fff;
+  }
+  .itemTitleRow { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+  .itemTitle { font-size: 16px; font-weight: 900; color: #111; }
+  .badge {
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    border: 1px solid #ddd;
+    background: #fafafa;
+    color: #333;
+    white-space: nowrap;
+  }
+  .meta { font-size: 13px; color: #444; margin-top: 6px; line-height: 1.35; }
+  .meta b { color: #111; }
+
+  .priceRow { margin-top: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .priceBox {
+    border: 1px solid #eee;
+    border-radius: 10px;
+    padding: 10px;
+    background: #fbfbfb;
+  }
+  .priceLabel { font-size: 12px; color: #666; margin-bottom: 4px; }
+  .priceValue { font-size: 16px; font-weight: 900; color: #111; }
+
+  .notesBox {
+    border: 1px dashed #ddd;
+    background: #fffdf6;
+    padding: 10px;
+    border-radius: 10px;
+    line-height: 1.35;
+  }
+  .notesTitle { font-weight: 900; margin-bottom: 4px; }
+
+  details { margin-top: 10px; }
+  pre {
+    white-space: pre-wrap;
+    word-break: break-word;
+    background: #f7f7f7;
+    border: 1px solid #eee;
+    padding: 10px;
+    border-radius: 10px;
+    margin: 8px 0 0;
+    font-size: 12px;
   }
 </style>
 </head>
@@ -81,7 +140,7 @@
     <label><input type="radio" name="mode" value="multi"> Multi (max 8)</label>
   </span>
 
-  <button class="primary" onclick="analyze()">Analyze</button>
+  <button id="analyzeBtn" class="primary" onclick="analyze()">Analyze</button>
 </div>
 
 <div class="grid">
@@ -96,17 +155,22 @@
     <div id="previewStrip" class="previewStrip"></div>
 
     <div class="tipBox">
-      Tip: Add close-up photos of stamps, markings, signatures, or crisp edges.
-      If results are unclear or items are missed, take a brighter and closer photo.
-      <br><br>
-      Max photos per scan: <b>4</b>. Max items in multi-item mode: <b>8</b>.
+      <b>Scan tips:</b><br>
+      • Add close-up photos of stamps, markings, signatures, or crisp edges.<br>
+      • If results are unclear or items are missed, take a brighter and closer photo.<br><br>
+      <b>Limits:</b> Max photos per scan: <b>4</b>. Max items in multi-item mode: <b>8</b>.
     </div>
   </div>
 
   <div class="card">
     <h3>Result</h3>
     <div id="status" class="status"></div>
-    <div id="result"></div>
+    <div id="result" class="resultWrap"></div>
+
+    <details>
+      <summary>Show raw JSON</summary>
+      <pre id="raw"></pre>
+    </details>
   </div>
 
 </div>
@@ -120,25 +184,26 @@
   const previewStrip = document.getElementById("previewStrip");
   const statusEl = document.getElementById("status");
   const resultEl = document.getElementById("result");
+  const rawEl = document.getElementById("raw");
+  const analyzeBtn = document.getElementById("analyzeBtn");
 
   let selectedFiles = [];
   let previewUrls = [];
+  let activePreviewIndex = 0;
 
   function openCamera() { cameraInput.value = ""; cameraInput.click(); }
   function openGallery() { galleryInput.value = ""; galleryInput.click(); }
   function addDetail() { extraInput.value = ""; extraInput.click(); }
 
   cameraInput.onchange = e => addFiles(e.target.files);
-  galleryInput.onchange = e => {
-    clearSelected();
-    addFiles(e.target.files);
-  };
+  galleryInput.onchange = e => { clearSelected(); addFiles(e.target.files); };
   extraInput.onchange = e => addFiles(e.target.files);
 
   function clearSelected() {
     selectedFiles = [];
     previewUrls.forEach(u => URL.revokeObjectURL(u));
     previewUrls = [];
+    activePreviewIndex = 0;
     renderPreview();
   }
 
@@ -153,31 +218,67 @@
     renderPreview();
   }
 
-  function renderPreview() {
-    if (previewUrls.length > 0) preview.src = previewUrls[0];
+  function setActivePreview(idx) {
+    activePreviewIndex = idx;
+    if (previewUrls[idx]) preview.src = previewUrls[idx];
+    renderStrip();
+  }
+
+  function renderStrip() {
     previewStrip.innerHTML = "";
-    previewUrls.forEach(url => {
+    previewUrls.forEach((url, i) => {
       const img = document.createElement("img");
       img.src = url;
-      img.className = "previewThumb";
+      img.className = "previewThumb" + (i === activePreviewIndex ? " active" : "");
+      img.onclick = () => setActivePreview(i);
       previewStrip.appendChild(img);
     });
+  }
+
+  function renderPreview() {
+    if (previewUrls.length > 0) preview.src = previewUrls[activePreviewIndex] || previewUrls[0];
+    else preview.removeAttribute("src");
+    renderStrip();
   }
 
   async function readJsonOrText(resp) {
     const ct = (resp.headers.get("content-type") || "").toLowerCase();
     const text = await resp.text();
     if (ct.includes("application/json")) {
-      try { return JSON.parse(text); } catch { return { error: "Invalid JSON response", raw: text }; }
+      try { return JSON.parse(text); }
+      catch { return { error: "Invalid JSON response", raw: text }; }
     }
-    // Not JSON (could be HTML redirect/login page or server error)
     return { error: "Non-JSON response from server", raw: text };
   }
 
-  function showPayload(payload) {
-    // Prefer payload.result if present; otherwise show whole payload
-    const toShow = (payload && typeof payload === "object" && payload.result) ? payload.result : payload;
-    resultEl.innerHTML = `<pre>${escapeHtml(JSON.stringify(toShow, null, 2))}</pre>`;
+  function moneyish(v) {
+    if (v === null || v === undefined) return "";
+    if (typeof v === "number") return `$${v}`;
+    const s = String(v).trim();
+    if (!s) return "";
+    // if already has $ or range, return as-is
+    if (s.includes("$")) return s;
+    return s;
+  }
+
+  function setRaw(payload) {
+    rawEl.textContent = JSON.stringify(payload, null, 2);
+  }
+
+  function clearResult() {
+    resultEl.innerHTML = "";
+    setRaw({});
+  }
+
+  function renderError(payload, httpStatus) {
+    const msg = payload?.error || payload?.detail || "Error";
+    statusEl.innerHTML = `<span class="err">${msg}</span>${httpStatus ? ` (HTTP ${httpStatus})` : ""}`;
+    resultEl.innerHTML = `
+      <div class="notesBox">
+        <div class="notesTitle">What happened</div>
+        <div>${escapeHtml(payload?.details || payload?.raw || "Please try again.")}</div>
+      </div>
+    `;
   }
 
   function escapeHtml(str) {
@@ -189,17 +290,84 @@
       .replaceAll("'", "&#039;");
   }
 
+  function renderStructured(payload) {
+    // payload may be {scan_id,...,result:{...}} OR already the result object
+    const data = payload?.result ? payload.result : payload;
+
+    const items = Array.isArray(data?.items) ? data.items : [];
+    const notes = data?.notes || {};
+
+    // Notes / next best photo
+    if (notes?.clarification_request || notes?.suggestions) {
+      const clar = notes?.clarification_request ? `<div><b>Next best photo:</b> ${escapeHtml(notes.clarification_request)}</div>` : "";
+      const sugg = notes?.suggestions ? `<div style="margin-top:6px;"><b>Tips:</b> ${escapeHtml(notes.suggestions)}</div>` : "";
+      const box = document.createElement("div");
+      box.className = "notesBox";
+      box.innerHTML = `<div class="notesTitle">Improve accuracy</div>${clar}${sugg}`;
+      resultEl.appendChild(box);
+    }
+
+    if (!items.length) {
+      // Fallback: show raw
+      const box = document.createElement("div");
+      box.className = "notesBox";
+      box.innerHTML = `<div class="notesTitle">Result</div><div>No items returned. Check raw JSON below.</div>`;
+      resultEl.appendChild(box);
+      return;
+    }
+
+    items.forEach((it, idx) => {
+      const card = document.createElement("div");
+      card.className = "itemCard";
+
+      const name = it?.name || it?.title || `Item ${idx + 1}`;
+      const author = it?.author ? ` • ${it.author}` : "";
+      const condition = it?.condition ? it.condition : (it?.condition_notes || "");
+      const cat = it?.category || "";
+
+      const pricing = it?.pricing_estimate || {};
+      const indiv = moneyish(pricing?.individual_price ?? it?.suggested_list_price ?? it?.suggested_listing_price);
+      const bundle = moneyish(pricing?.bundle_price_range ?? it?.bundle_price_range ?? it?.estimated_value_range);
+
+      card.innerHTML = `
+        <div class="itemTitleRow">
+          <div class="itemTitle">${escapeHtml(name)}</div>
+          <div class="badge">Shared with your team</div>
+        </div>
+
+        <div class="meta">
+          ${cat ? `<div><b>Category:</b> ${escapeHtml(cat)}</div>` : ""}
+          ${condition ? `<div><b>Condition:</b> ${escapeHtml(condition)}</div>` : ""}
+          ${author ? `<div><b>Details:</b>${escapeHtml(author)}</div>` : ""}
+        </div>
+
+        <div class="priceRow">
+          <div class="priceBox">
+            <div class="priceLabel">Suggested listing price</div>
+            <div class="priceValue">${escapeHtml(indiv || "—")}</div>
+          </div>
+          <div class="priceBox">
+            <div class="priceLabel">Bundle / range</div>
+            <div class="priceValue">${escapeHtml(bundle || "—")}</div>
+          </div>
+        </div>
+      `;
+
+      resultEl.appendChild(card);
+    });
+  }
+
   async function analyze() {
     if (selectedFiles.length === 0) {
       statusEl.innerHTML = '<span class="err">Select a photo first.</span>';
       return;
     }
 
+    analyzeBtn.disabled = true;
     statusEl.textContent = "Analyzing…";
-    resultEl.innerHTML = "";
+    clearResult();
 
     const formData = new FormData();
-    // Backend expects "images"
     selectedFiles.forEach(f => formData.append("images", f));
 
     const mode = document.querySelector('input[name="mode"]:checked')?.value || "single";
@@ -207,29 +375,25 @@
 
     try {
       const resp = await fetch("/analyze-image", { method: "POST", body: formData });
-
-      // If not logged in, FastAPI will return 401 JSON. If Render/login redirects, it may return HTML.
       const payload = await readJsonOrText(resp);
+      setRaw(payload);
 
       if (!resp.ok) {
-        statusEl.innerHTML = `<span class="err">Error</span> (HTTP ${resp.status})`;
-        showPayload(payload);
+        renderError(payload, resp.status);
         return;
       }
-
-      // If backend returns {"error": "..."} still treat as error
-      if (payload && payload.error) {
-        statusEl.innerHTML = `<span class="err">Error</span>`;
-        showPayload(payload);
+      if (payload?.error) {
+        renderError(payload);
         return;
       }
 
       statusEl.innerHTML = `<span class="ok">Done ✔</span>`;
-      showPayload(payload);
+      renderStructured(payload);
 
     } catch (e) {
-      statusEl.innerHTML = `<span class="err">Error</span>`;
-      resultEl.innerHTML = `<pre>${escapeHtml(String(e?.message || e))}</pre>`;
+      renderError({ error: "Network error", details: String(e?.message || e) });
+    } finally {
+      analyzeBtn.disabled = false;
     }
   }
 </script>
