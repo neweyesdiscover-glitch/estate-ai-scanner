@@ -1,263 +1,254 @@
 <!doctype html>
 <html>
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Estate AI Scanner</title>
-  <style>
-    body { font-family: Arial, sans-serif; padding: 24px; max-width: 1100px; margin: 0 auto; }
-    h1 { margin: 0 0 6px; }
-    .sub { margin: 0 0 16px; color: #555; }
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Estate AI Scanner</title>
 
-    .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 10px 0 18px; }
-    button { padding: 10px 14px; border-radius: 8px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
-    button.primary { background: #2b7cff; color: #fff; border-color: #2b7cff; font-weight: 700; }
-    button:disabled { opacity: 0.6; cursor: not-allowed; }
+<style>
+body {
+  font-family: Arial, sans-serif;
+  padding: 16px;
+  max-width: 1100px;
+  margin: 0 auto;
+}
 
-    .modeBox {
-      display: inline-flex;
-      gap: 10px;
-      align-items: center;
-      border: 1px solid #eee;
-      border-radius: 10px;
-      padding: 8px 10px;
-      background: #fafafa;
-      font-size: 13px;
-    }
-    .modeBox label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
-    .modeNote { font-size: 12px; color: #666; margin-left: 6px; }
+h1 { margin-bottom: 6px; }
+.sub { color: #555; margin-bottom: 16px; }
 
-    .grid { display: grid; grid-template-columns: 360px 1fr; gap: 18px; }
-    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
 
-    .card { border: 1px solid #ddd; border-radius: 12px; padding: 14px; background: #fff; }
-    .card h3 { margin: 0 0 10px; }
+button {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  background: #fff;
+  cursor: pointer;
+}
 
-    #preview {
-      width: 100%;
-      max-height: 520px;
-      object-fit: contain;
-      border-radius: 10px;
-      border: 1px solid #eee;
-      display: none;
-    }
+button.primary {
+  background: #2b7cff;
+  color: #fff;
+  border-color: #2b7cff;
+  font-weight: bold;
+}
 
-    .status { margin: 8px 0 0; color: #666; font-size: 13px; }
-    .ok { color: #0a7a0a; font-weight: 700; }
-    .err { color: #b00020; font-weight: 700; }
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
 
-    .resultLine { margin: 6px 0; line-height: 1.25; }
-    .label { font-weight: 800; }
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
 
-    .historyList { display: flex; flex-direction: column; gap: 10px; }
-    .historyItem {
-      display: grid;
-      grid-template-columns: 72px 1fr;
-      gap: 10px;
-      align-items: center;
-      border: 1px solid #eee;
-      border-radius: 10px;
-      padding: 8px;
-      cursor: pointer;
-    }
-    .historyItem:hover { background: #fafafa; }
+.card {
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  padding: 12px;
+  background: #fff;
+}
 
-    .thumb { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; border: 1px solid #eee; }
-  </style>
+/* FIXED PREVIEW BEHAVIOR */
+#previewContainer {
+  width: 100%;
+  max-height: 420px;
+  overflow: hidden;
+  border-radius: 10px;
+  border: 1px solid #eee;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fafafa;
+}
+
+#preview {
+  max-width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+}
+
+.previewStrip {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.previewThumb {
+  width: 60px;
+  height: 60px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid #ddd;
+}
+
+.status { margin-top: 8px; }
+.ok { color: green; font-weight: bold; }
+.err { color: red; font-weight: bold; }
+
+.resultLine { margin: 6px 0; }
+
+.tipBox {
+  margin-top: 14px;
+  font-size: 13px;
+  background: #f6f6f6;
+  padding: 8px;
+  border-radius: 8px;
+}
+</style>
 </head>
 
 <body>
-  <h1>Estate AI Scanner</h1>
-  <p class="sub" id="subtitle">Snap a photo, identify the item(s), and get an estimate.</p>
 
-  <!-- Capture inputs -->
-  <input id="cameraInput" type="file" accept="image/*" capture="environment" style="display:none" />
-  <input id="galleryInput" type="file" accept="image/*" style="display:none" />
-  <input id="extraInput" type="file" accept="image/*" style="display:none" multiple />
+<h1>Estate AI Scanner</h1>
+<p class="sub">Snap a photo, identify the item(s), and get an estimate.</p>
 
-  <div class="controls">
-    <button onclick="openCamera()">Use Camera</button>
-    <button onclick="openGallery()">Choose From Photos</button>
-    <button onclick="addDetailPhoto()">Add Detail Photo</button>
+<input id="cameraInput" type="file" accept="image/*" capture="environment" hidden />
+<input id="galleryInput" type="file" accept="image/*" hidden />
+<input id="extraInput" type="file" accept="image/*" multiple hidden />
 
-    <span class="modeBox">
-      <span style="font-weight:800;">Analyze as:</span>
-      <label><input type="radio" name="mode" value="single" checked /> Single / Bundle</label>
-      <label><input type="radio" name="mode" value="multi" /> Multiple items</label>
-      <span class="modeNote">(multi max 8)</span>
-    </span>
+<div class="controls">
+  <button onclick="openCamera()">Use Camera</button>
+  <button onclick="openGallery()">Choose From Photos</button>
+  <button onclick="addDetail()">Add Detail Photo</button>
 
-    <button id="analyzeBtn" class="primary" onclick="analyze()">Analyze</button>
-    <button onclick="refreshTeamHistory()">Refresh Team History</button>
-    <button onclick="clearLocalHistory()">Clear Local History</button>
-  </div>
+  <label>
+    <input type="radio" name="mode" value="single" checked>
+    Single / Bundle
+  </label>
 
-  <div class="grid">
-    <div class="card">
-      <h3>Preview</h3>
-      <img id="preview" alt="Preview" />
-      <div id="previewHint" class="status">Select a photo to begin.</div>
-      <div id="previewStrip" class="previewStrip"></div>
+  <label>
+    <input type="radio" name="mode" value="multi">
+    Multi (max 8)
+  </label>
 
-      <div class="small">
-        Tip: For antiques/crystal/china, add a close-up of the backstamp/marking. If results miss items or are unclear, take a closer photo with better lighting.
-      </div>
+  <button class="primary" onclick="analyze()">Analyze</button>
+</div>
+
+<div class="grid">
+
+  <div class="card">
+    <h3>Preview</h3>
+
+    <div id="previewContainer">
+      <img id="preview" />
     </div>
 
-    <div class="card">
-      <h3>Result</h3>
-      <div id="status" class="status"></div>
-      <div id="result"></div>
-    </div>
+    <div id="previewStrip" class="previewStrip"></div>
 
-    <div class="card" style="grid-column: 1 / -1;">
-      <h3>Team History (shared)</h3>
-      <div id="teamHistory" class="historyList"></div>
-      <div id="teamEmpty" class="status">No team scans yet.</div>
-    </div>
-
-    <div class="card" style="grid-column: 1 / -1;">
-      <h3>Local History (this device)</h3>
-      <div id="history" class="historyList"></div>
-      <div id="historyEmpty" class="status">No local scans saved yet.</div>
-      <div class="small">Local history stores results only (no photos) to avoid storage limits.</div>
+    <div class="tipBox">
+      Tip: Add close-up photos of stamps, markings, signatures, or edges.
+      If results are unclear, take a brighter and closer photo.
     </div>
   </div>
 
-  <script>
-    const cameraInput = document.getElementById("cameraInput");
-    const galleryInput = document.getElementById("galleryInput");
-    const extraInput = document.getElementById("extraInput");
+  <div class="card">
+    <h3>Result</h3>
+    <div id="status" class="status"></div>
+    <div id="result"></div>
+  </div>
 
-    const preview = document.getElementById("preview");
-    const previewHint = document.getElementById("previewHint");
-    const previewStrip = document.getElementById("previewStrip");
+</div>
 
-    const statusEl = document.getElementById("status");
-    const resultEl = document.getElementById("result");
-    const analyzeBtn = document.getElementById("analyzeBtn");
+<script>
 
-    const LOCAL_HISTORY_KEY = "estate_ai_local_history_v1";
-    const LOCAL_HISTORY_LIMIT = 25;
+const cameraInput = document.getElementById("cameraInput");
+const galleryInput = document.getElementById("galleryInput");
+const extraInput = document.getElementById("extraInput");
 
-    let selectedFiles = [];     // supports multiple photos per scan
-    let selectedUrls = [];      // object URLs for preview thumbnails
-    let lastScanId = null;      // for refine
+const preview = document.getElementById("preview");
+const previewStrip = document.getElementById("previewStrip");
+const statusEl = document.getElementById("status");
+const resultEl = document.getElementById("result");
 
-    function escapeHtml(str) {
-      return String(str ?? "")
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
+let selectedFiles = [];
+let previewUrls = [];
+
+function openCamera() { cameraInput.click(); }
+function openGallery() { galleryInput.click(); }
+function addDetail() { extraInput.click(); }
+
+cameraInput.onchange = e => addFiles(e.target.files);
+galleryInput.onchange = e => {
+  selectedFiles = [];
+  previewUrls.forEach(u => URL.revokeObjectURL(u));
+  previewUrls = [];
+  addFiles(e.target.files);
+};
+extraInput.onchange = e => addFiles(e.target.files);
+
+function addFiles(files) {
+  for (let file of files) {
+    if (selectedFiles.length >= 4) break;
+    selectedFiles.push(file);
+    const url = URL.createObjectURL(file);
+    previewUrls.push(url);
+  }
+  renderPreview();
+}
+
+function renderPreview() {
+  if (previewUrls.length > 0) {
+    preview.src = previewUrls[0];
+  }
+  previewStrip.innerHTML = "";
+  previewUrls.forEach(url => {
+    const img = document.createElement("img");
+    img.src = url;
+    img.className = "previewThumb";
+    previewStrip.appendChild(img);
+  });
+}
+
+async function analyze() {
+
+  if (selectedFiles.length === 0) {
+    statusEl.innerHTML = '<span class="err">Select a photo first.</span>';
+    return;
+  }
+
+  statusEl.innerHTML = "Analyzing...";
+  resultEl.innerHTML = "";
+
+  const formData = new FormData();
+
+  selectedFiles.forEach(f => formData.append("images", f));
+
+  const mode = document.querySelector('input[name="mode"]:checked').value;
+  formData.append("analysis_mode", mode);
+
+  try {
+    const res = await fetch("/analyze-image", {
+      method: "POST",
+      body: formData
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      statusEl.innerHTML = '<span class="err">Error</span>';
+      resultEl.innerText = JSON.stringify(data);
+      return;
     }
 
-    function nowIso() { return new Date().toISOString(); }
+    statusEl.innerHTML = '<span class="ok">Done ✔</span>';
+    resultEl.innerHTML = `<pre>${JSON.stringify(data.result, null, 2)}</pre>`;
 
-    function setMainPreviewFromFirst() {
-      if (!selectedUrls.length) {
-        preview.style.display = "none";
-        return;
-      }
-      preview.src = selectedUrls[0];
-      preview.style.display = "block";
-    }
+  } catch (e) {
+    statusEl.innerHTML = '<span class="err">Error</span>';
+    resultEl.innerText = e.message;
+  }
 
-    function handleAddFiles(files) {
-      if (!files || !files.length) return;
+}
 
-      for (const f of files) {
-        if (selectedFiles.length >= 4) break; // matches backend default MAX_PHOTOS_PER_SCAN
-        selectedFiles.push(f);
-        const u = URL.createObjectURL(f);
-        selectedUrls.push(u);
-      }
-
-      setMainPreviewFromFirst();
-      renderPreviewStrip();
-
-      previewHint.textContent = selectedFiles.length > 1
-        ? `Ready to analyze (${selectedFiles.length} photos).`
-        : "Ready to analyze.";
-
-      statusEl.textContent = "";
-      resultEl.innerHTML = "";
-    }
-
-    function renderPreviewStrip() {
-      previewStrip.innerHTML = "";
-      selectedUrls.forEach((u, i) => {
-        const img = document.createElement("img");
-        img.className = "previewThumb";
-        img.src = u;
-        img.title = `Photo ${i+1}`;
-        previewStrip.appendChild(img);
-      });
-    }
-
-    function openCamera() { cameraInput.value = ""; cameraInput.click(); }
-    function openGallery() { galleryInput.value = ""; galleryInput.click(); }
-    function addDetailPhoto() { extraInput.value = ""; extraInput.click(); }
-
-    cameraInput.addEventListener("change", () => handleAddFiles(cameraInput.files));
-    galleryInput.addEventListener("change", () => { clearSelected(); handleAddFiles(galleryInput.files); });
-    extraInput.addEventListener("change", () => handleAddFiles(extraInput.files));
-
-    async function refineWithAnswers() {
-      if (!lastScanId) {
-        statusEl.innerHTML = `<span class="err">No scan to refine.</span>`;
-        return;
-      }
-
-      const answers = {};
-      Object.keys(pendingAnswers || {}).forEach(k => {
-        if (pendingAnswers[k]) answers[k] = pendingAnswers[k];
-      });
-
-      analyzeBtn.disabled = true;
-      statusEl.textContent = "Refining…";
-
-      const formData = new FormData();
-      formData.append("scan_id", String(lastScanId));
-      formData.append("answers_json", JSON.stringify(answers));
-
-      try {
-        const resp = await fetch("/refine", { method: "POST", body: formData });
-        if (resp.status === 401) { window.location.href = "/login"; return; }
-        const payload = await readJsonOrText(resp);
-        if (!resp.ok) throw new Error(payload?.detail || "Refine failed");
-
-        statusEl.innerHTML = `<span class="ok">Updated ✅</span>`;
-        lastScanId = payload.scan_id || lastScanId;
-        renderResult(payload);
-
-        await refreshTeamHistory();
-        resultEl.scrollIntoView({ behavior: "smooth", block: "start" });
-
-      } catch (e) {
-        statusEl.innerHTML = `<span class="err">Error:</span> ${escapeHtml(e.message)}`;
-      } finally {
-        analyzeBtn.disabled = false;
-      }
-    }
-
-    function renderResult(payloadOrResult) {
-      const data = extractResult(payloadOrResult);
-
-      if (!data || typeof data !== "object") {
-        resultEl.innerHTML = `<pre>${escapeHtml(String(data))}</pre>`;
-        return;
-      }
-      if (data.error) {
-        statusEl.innerHTML = `<span class="err">Error:</span> ${escapeHtml(data.error)}`;
-        if (data.raw) resultEl.innerHTML = `<pre>${escapeHtml(data.raw)}</pre>`;
-        return;
-      }
-
-      if (data.mode === "multi") renderMulti(data);
-      else renderSingle(data);
-    }
-  </script>
+</script>
 </body>
 </html>
