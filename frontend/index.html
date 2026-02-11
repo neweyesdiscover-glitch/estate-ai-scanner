@@ -6,103 +6,59 @@
 <title>Estate AI Scanner</title>
 
 <style>
-body {
-  font-family: Arial, sans-serif;
-  padding: 16px;
-  max-width: 1100px;
-  margin: 0 auto;
-}
+  body { font-family: Arial, sans-serif; padding: 16px; max-width: 1100px; margin: 0 auto; }
+  h1 { margin-bottom: 6px; }
+  .sub { color: #555; margin-bottom: 16px; }
 
-h1 { margin-bottom: 6px; }
-.sub { color: #555; margin-bottom: 16px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; align-items: center; }
+  button { padding: 8px 12px; border-radius: 8px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
+  button.primary { background: #2b7cff; color: #fff; border-color: #2b7cff; font-weight: bold; }
 
-.controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 16px;
-}
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
 
-button {
-  padding: 8px 12px;
-  border-radius: 8px;
-  border: 1px solid #ccc;
-  background: #fff;
-  cursor: pointer;
-}
+  .card { border: 1px solid #ddd; border-radius: 12px; padding: 12px; background: #fff; }
 
-button.primary {
-  background: #2b7cff;
-  color: #fff;
-  border-color: #2b7cff;
-  font-weight: bold;
-}
-
-.grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-}
-
-@media (max-width: 900px) {
-  .grid {
-    grid-template-columns: 1fr;
+  #previewContainer {
+    width: 100%;
+    max-height: 420px;
+    overflow: hidden;
+    border-radius: 10px;
+    border: 1px solid #eee;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #fafafa;
   }
-}
+  #preview { max-width: 100%; max-height: 420px; object-fit: contain; }
 
-.card {
-  border: 1px solid #ddd;
-  border-radius: 12px;
-  padding: 12px;
-  background: #fff;
-}
+  .previewStrip { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .previewThumb { width: 60px; height: 60px; object-fit: cover; border-radius: 6px; border: 1px solid #ddd; }
 
-/* FIXED PREVIEW BEHAVIOR */
-#previewContainer {
-  width: 100%;
-  max-height: 420px;
-  overflow: hidden;
-  border-radius: 10px;
-  border: 1px solid #eee;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #fafafa;
-}
+  .status { margin-top: 8px; }
+  .ok { color: #0a7a0a; font-weight: bold; }
+  .err { color: #b00020; font-weight: bold; }
 
-#preview {
-  max-width: 100%;
-  max-height: 420px;
-  object-fit: contain;
-}
+  pre { white-space: pre-wrap; word-break: break-word; background: #f7f7f7; border: 1px solid #eee; padding: 10px; border-radius: 10px; }
 
-.previewStrip {
-  display: flex;
-  gap: 6px;
-  margin-top: 8px;
-}
+  .tipBox {
+    margin-top: 14px;
+    font-size: 13px;
+    background: #f6f6f6;
+    padding: 8px;
+    border-radius: 8px;
+  }
 
-.previewThumb {
-  width: 60px;
-  height: 60px;
-  object-fit: cover;
-  border-radius: 6px;
-  border: 1px solid #ddd;
-}
-
-.status { margin-top: 8px; }
-.ok { color: green; font-weight: bold; }
-.err { color: red; font-weight: bold; }
-
-.resultLine { margin: 6px 0; }
-
-.tipBox {
-  margin-top: 14px;
-  font-size: 13px;
-  background: #f6f6f6;
-  padding: 8px;
-  border-radius: 8px;
-}
+  .modeBox {
+    display: inline-flex;
+    gap: 10px;
+    align-items: center;
+    border: 1px solid #eee;
+    border-radius: 10px;
+    padding: 6px 10px;
+    background: #fafafa;
+    font-size: 13px;
+  }
 </style>
 </head>
 
@@ -120,15 +76,10 @@ button.primary {
   <button onclick="openGallery()">Choose From Photos</button>
   <button onclick="addDetail()">Add Detail Photo</button>
 
-  <label>
-    <input type="radio" name="mode" value="single" checked>
-    Single / Bundle
-  </label>
-
-  <label>
-    <input type="radio" name="mode" value="multi">
-    Multi (max 8)
-  </label>
+  <span class="modeBox">
+    <label><input type="radio" name="mode" value="single" checked> Single / Bundle</label>
+    <label><input type="radio" name="mode" value="multi"> Multi (max 8)</label>
+  </span>
 
   <button class="primary" onclick="analyze()">Analyze</button>
 </div>
@@ -139,14 +90,16 @@ button.primary {
     <h3>Preview</h3>
 
     <div id="previewContainer">
-      <img id="preview" />
+      <img id="preview" alt="Preview" />
     </div>
 
     <div id="previewStrip" class="previewStrip"></div>
 
     <div class="tipBox">
-      Tip: Add close-up photos of stamps, markings, signatures, or edges.
-      If results are unclear, take a brighter and closer photo.
+      Tip: Add close-up photos of stamps, markings, signatures, or crisp edges.
+      If results are unclear or items are missed, take a brighter and closer photo.
+      <br><br>
+      Max photos per scan: <b>4</b>. Max items in multi-item mode: <b>8</b>.
     </div>
   </div>
 
@@ -159,96 +112,127 @@ button.primary {
 </div>
 
 <script>
+  const cameraInput = document.getElementById("cameraInput");
+  const galleryInput = document.getElementById("galleryInput");
+  const extraInput = document.getElementById("extraInput");
 
-const cameraInput = document.getElementById("cameraInput");
-const galleryInput = document.getElementById("galleryInput");
-const extraInput = document.getElementById("extraInput");
+  const preview = document.getElementById("preview");
+  const previewStrip = document.getElementById("previewStrip");
+  const statusEl = document.getElementById("status");
+  const resultEl = document.getElementById("result");
 
-const preview = document.getElementById("preview");
-const previewStrip = document.getElementById("previewStrip");
-const statusEl = document.getElementById("status");
-const resultEl = document.getElementById("result");
+  let selectedFiles = [];
+  let previewUrls = [];
 
-let selectedFiles = [];
-let previewUrls = [];
+  function openCamera() { cameraInput.value = ""; cameraInput.click(); }
+  function openGallery() { galleryInput.value = ""; galleryInput.click(); }
+  function addDetail() { extraInput.value = ""; extraInput.click(); }
 
-function openCamera() { cameraInput.click(); }
-function openGallery() { galleryInput.click(); }
-function addDetail() { extraInput.click(); }
+  cameraInput.onchange = e => addFiles(e.target.files);
+  galleryInput.onchange = e => {
+    clearSelected();
+    addFiles(e.target.files);
+  };
+  extraInput.onchange = e => addFiles(e.target.files);
 
-cameraInput.onchange = e => addFiles(e.target.files);
-galleryInput.onchange = e => {
-  selectedFiles = [];
-  previewUrls.forEach(u => URL.revokeObjectURL(u));
-  previewUrls = [];
-  addFiles(e.target.files);
-};
-extraInput.onchange = e => addFiles(e.target.files);
-
-function addFiles(files) {
-  for (let file of files) {
-    if (selectedFiles.length >= 4) break;
-    selectedFiles.push(file);
-    const url = URL.createObjectURL(file);
-    previewUrls.push(url);
-  }
-  renderPreview();
-}
-
-function renderPreview() {
-  if (previewUrls.length > 0) {
-    preview.src = previewUrls[0];
-  }
-  previewStrip.innerHTML = "";
-  previewUrls.forEach(url => {
-    const img = document.createElement("img");
-    img.src = url;
-    img.className = "previewThumb";
-    previewStrip.appendChild(img);
-  });
-}
-
-async function analyze() {
-
-  if (selectedFiles.length === 0) {
-    statusEl.innerHTML = '<span class="err">Select a photo first.</span>';
-    return;
+  function clearSelected() {
+    selectedFiles = [];
+    previewUrls.forEach(u => URL.revokeObjectURL(u));
+    previewUrls = [];
+    renderPreview();
   }
 
-  statusEl.innerHTML = "Analyzing...";
-  resultEl.innerHTML = "";
+  function addFiles(files) {
+    if (!files || files.length === 0) return;
 
-  const formData = new FormData();
+    for (let file of files) {
+      if (selectedFiles.length >= 4) break;
+      selectedFiles.push(file);
+      previewUrls.push(URL.createObjectURL(file));
+    }
+    renderPreview();
+  }
 
-  selectedFiles.forEach(f => formData.append("images", f));
-
-  const mode = document.querySelector('input[name="mode"]:checked').value;
-  formData.append("analysis_mode", mode);
-
-  try {
-    const res = await fetch("/analyze-image", {
-      method: "POST",
-      body: formData
+  function renderPreview() {
+    if (previewUrls.length > 0) preview.src = previewUrls[0];
+    previewStrip.innerHTML = "";
+    previewUrls.forEach(url => {
+      const img = document.createElement("img");
+      img.src = url;
+      img.className = "previewThumb";
+      previewStrip.appendChild(img);
     });
+  }
 
-    const data = await res.json();
+  async function readJsonOrText(resp) {
+    const ct = (resp.headers.get("content-type") || "").toLowerCase();
+    const text = await resp.text();
+    if (ct.includes("application/json")) {
+      try { return JSON.parse(text); } catch { return { error: "Invalid JSON response", raw: text }; }
+    }
+    // Not JSON (could be HTML redirect/login page or server error)
+    return { error: "Non-JSON response from server", raw: text };
+  }
 
-    if (!res.ok) {
-      statusEl.innerHTML = '<span class="err">Error</span>';
-      resultEl.innerText = JSON.stringify(data);
+  function showPayload(payload) {
+    // Prefer payload.result if present; otherwise show whole payload
+    const toShow = (payload && typeof payload === "object" && payload.result) ? payload.result : payload;
+    resultEl.innerHTML = `<pre>${escapeHtml(JSON.stringify(toShow, null, 2))}</pre>`;
+  }
+
+  function escapeHtml(str) {
+    return String(str ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  async function analyze() {
+    if (selectedFiles.length === 0) {
+      statusEl.innerHTML = '<span class="err">Select a photo first.</span>';
       return;
     }
 
-    statusEl.innerHTML = '<span class="ok">Done ✔</span>';
-    resultEl.innerHTML = `<pre>${JSON.stringify(data.result, null, 2)}</pre>`;
+    statusEl.textContent = "Analyzing…";
+    resultEl.innerHTML = "";
 
-  } catch (e) {
-    statusEl.innerHTML = '<span class="err">Error</span>';
-    resultEl.innerText = e.message;
+    const formData = new FormData();
+    // Backend expects "images"
+    selectedFiles.forEach(f => formData.append("images", f));
+
+    const mode = document.querySelector('input[name="mode"]:checked')?.value || "single";
+    formData.append("analysis_mode", mode);
+
+    try {
+      const resp = await fetch("/analyze-image", { method: "POST", body: formData });
+
+      // If not logged in, FastAPI will return 401 JSON. If Render/login redirects, it may return HTML.
+      const payload = await readJsonOrText(resp);
+
+      if (!resp.ok) {
+        statusEl.innerHTML = `<span class="err">Error</span> (HTTP ${resp.status})`;
+        showPayload(payload);
+        return;
+      }
+
+      // If backend returns {"error": "..."} still treat as error
+      if (payload && payload.error) {
+        statusEl.innerHTML = `<span class="err">Error</span>`;
+        showPayload(payload);
+        return;
+      }
+
+      statusEl.innerHTML = `<span class="ok">Done ✔</span>`;
+      showPayload(payload);
+
+    } catch (e) {
+      statusEl.innerHTML = `<span class="err">Error</span>`;
+      resultEl.innerHTML = `<pre>${escapeHtml(String(e?.message || e))}</pre>`;
+    }
   }
-
-}
-
 </script>
+
 </body>
 </html>
