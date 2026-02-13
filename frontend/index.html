@@ -1,672 +1,924 @@
+<!-- frontend/index.html
+     ✅ Estate AI Scanner — Camera + Local History + Shared Team History
+     - NO login logic in frontend (backend handles /login redirect)
+     - Step 1: choose One vs Many (forced)
+     - Multi-photo scan (up to 4 photos)
+     - Local history uses compressed thumbnails to avoid quota
+     - Team History pulled from server (shared)
+-->
+
 <!doctype html>
 <html>
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Estate AI Scanner</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Estate AI Scanner</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 24px; max-width: 1100px; margin: 0 auto; }
+    h1 { margin: 0 0 6px; }
+    .sub { margin: 0 0 16px; color: #555; line-height: 1.35; }
 
-<style>
-  body { font-family: Arial, sans-serif; padding: 16px; max-width: 1100px; margin: 0 auto; }
-  h1 { margin: 0 0 6px; }
-  .sub { color: #555; margin: 0 0 16px; }
+    .card { border: 1px solid #ddd; border-radius: 14px; padding: 14px; background: #fff; }
+    .card h3 { margin: 0 0 10px; }
 
-  .hero {
-    border: 1px solid #e7e7e7;
-    border-radius: 14px;
-    padding: 14px;
-    background: #fafafa;
-    margin-bottom: 14px;
-  }
-  .steps { margin: 0 0 10px; color: #333; line-height: 1.35; }
-  .steps b { font-weight: 900; }
-  .ctaRow { display:flex; gap:10px; flex-wrap:wrap; margin-top: 10px; }
-  .cta {
-    flex: 1;
-    min-width: 180px;
-    padding: 14px 14px;
-    border-radius: 12px;
-    border: 1px solid #d8d8d8;
-    background: #fff;
-    cursor: pointer;
-    font-weight: 900;
-  }
-  .cta.primary {
-    background: #2b7cff;
-    color: #fff;
-    border-color: #2b7cff;
-  }
+    .grid { display: grid; grid-template-columns: 360px 1fr; gap: 18px; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
 
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+    .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 10px 0 18px; }
+    button { padding: 10px 14px; border-radius: 10px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
+    button.primary { background: #2b7cff; color: #fff; border-color: #2b7cff; font-weight: 800; }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
 
-  .card { border: 1px solid #ddd; border-radius: 12px; padding: 12px; background: #fff; }
-  .card h3 { margin: 0 0 10px; }
+    .pill { display:inline-flex; align-items:center; gap:8px; padding: 6px 10px; border-radius: 999px; border: 1px solid #e6e6e6; background: #fafafa; font-size: 12px; color:#333; }
+    .pill strong { font-weight: 900; }
+    .sharedPill { background: #f2f7ff; border-color: #cfe2ff; color: #1b5dbf; }
 
-  #previewContainer {
-    width: 100%;
-    max-height: 420px;
-    overflow: hidden;
-    border-radius: 10px;
-    border: 1px solid #eee;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: #fafafa;
-  }
-  #preview { max-width: 100%; max-height: 420px; object-fit: contain; }
+    #preview {
+      width: 100%;
+      max-height: 520px;
+      object-fit: contain;
+      border-radius: 12px;
+      border: 1px solid #eee;
+      display: none;
+      background: #fafafa;
+    }
 
-  .previewStrip { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
-  .previewThumb {
-    width: 60px; height: 60px; object-fit: cover;
-    border-radius: 8px; border: 2px solid transparent;
-    cursor: pointer;
-  }
-  .previewThumb.active { border-color: #2b7cff; }
+    .status { margin: 8px 0 0; color: #666; font-size: 13px; }
+    .ok { color: #0a7a0a; font-weight: 900; }
+    .err { color: #b00020; font-weight: 900; }
 
-  .status { margin-top: 8px; font-size: 14px; }
-  .ok { color: #0a7a0a; font-weight: 900; }
-  .err { color: #b00020; font-weight: 900; }
+    .stepBox { border: 1px solid #eee; background: #fbfbfb; border-radius: 14px; padding: 14px; margin-bottom: 14px; }
+    .stepTitle { font-weight: 900; margin-bottom: 8px; }
+    .stepRow { display:flex; gap:10px; flex-wrap: wrap; align-items: center; }
+    .stepHint { color:#666; font-size: 13px; margin-top: 6px; }
 
-  .tipBox {
-    margin-top: 14px;
-    font-size: 13px;
-    background: #f6f6f6;
-    padding: 10px;
-    border-radius: 10px;
-    line-height: 1.35;
-  }
+    /* Checkbox-style mode choices */
+    .modeChoice {
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid #e6e6e6;
+      background: #fff;
+      cursor: pointer;
+      user-select: none;
+      min-width: 220px;
+    }
+    .modeChoice:hover { background:#fafafa; }
+    .modeChoice.selected { border-color:#2b7cff; box-shadow: 0 0 0 3px rgba(43,124,255,0.12); }
+    .modeChoice input { width: 18px; height: 18px; }
+    .modeText { display:flex; flex-direction: column; gap:2px; }
+    .modeText .label { font-weight: 900; color:#111; }
+    .modeText .desc { font-size: 12px; color:#666; }
 
-  /* Mode tiles */
-  .modeWrap { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
-  @media (max-width: 600px) { .modeWrap { grid-template-columns: 1fr; } }
-  .modeTile {
-    border: 2px solid #e4e4e4;
-    border-radius: 14px;
-    padding: 12px;
-    background: #fff;
-    cursor: pointer;
-  }
-  .modeTile.active { border-color: #2b7cff; box-shadow: 0 0 0 2px rgba(43,124,255,.15) inset; }
-  .modeTitle { font-weight: 900; margin-bottom: 4px; }
-  .modeSub { color:#555; font-size: 13px; }
+    .infoIcon {
+      width: 18px;
+      height: 18px;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      border-radius: 999px;
+      border: 1px solid #cfcfcf;
+      font-size: 12px;
+      color:#333;
+      background:#fff;
+      cursor: pointer;
+    }
 
-  button { padding: 10px 12px; border-radius: 10px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
-  button.primary { background:#2b7cff; border-color:#2b7cff; color:#fff; font-weight: 900; }
-  button:disabled { opacity:.6; cursor:not-allowed; }
+    /* Modal */
+    .modalBackdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.35);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+      z-index: 9999;
+    }
+    .modal {
+      width: 100%;
+      max-width: 560px;
+      background: #fff;
+      border-radius: 16px;
+      border: 1px solid #e6e6e6;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+      overflow: hidden;
+    }
+    .modalHeader { padding: 14px 16px; border-bottom: 1px solid #eee; display:flex; align-items:center; justify-content: space-between; gap: 12px; }
+    .modalHeader strong { font-size: 16px; }
+    .modalBody { padding: 14px 16px; color:#333; line-height: 1.4; }
+    .modalBody ul { margin: 8px 0 0 18px; }
+    .modalFooter { padding: 12px 16px; border-top: 1px solid #eee; display:flex; justify-content:flex-end; }
+    .modalClose { border: 1px solid #ccc; background:#fff; border-radius: 10px; padding: 8px 12px; cursor:pointer; }
 
-  /* Results */
-  .resultWrap { display: flex; flex-direction: column; gap: 12px; }
-  .itemCard { border: 1px solid #eee; border-radius: 12px; padding: 12px; background: #fff; }
-  .itemTitleRow { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; }
-  .itemTitle { font-size: 16px; font-weight: 900; color:#111; line-height: 1.15; }
-  .badge { font-size: 12px; padding: 4px 8px; border-radius: 999px; border: 1px solid #ddd; background:#fafafa; color:#333; white-space: nowrap; }
-  .meta { font-size: 13px; color:#444; margin-top: 6px; line-height: 1.35; }
-  .meta b { color:#111; }
+    /* History */
+    .historyList { display: flex; flex-direction: column; gap: 10px; }
+    .historyItem {
+      display: grid;
+      grid-template-columns: 72px 1fr;
+      gap: 10px;
+      align-items: center;
+      border: 1px solid #eee;
+      border-radius: 12px;
+      padding: 10px;
+      cursor: pointer;
+      background: #fff;
+    }
+    .historyItem:hover { background: #fafafa; }
+    .historyItem.selected { border-color:#2b7cff; box-shadow: 0 0 0 3px rgba(43,124,255,0.12); }
+    .thumb { width: 72px; height: 72px; object-fit: cover; border-radius: 10px; border: 1px solid #eee; background:#f6f6f6; }
+    .thumbPlaceholder { display:flex; align-items:center; justify-content:center; font-size: 11px; color:#777; }
+    .historyMeta { font-size: 13px; color: #444; }
+    .historyMeta .title { font-weight: 900; color: #111; margin-bottom: 2px; font-size: 14px; }
+    .historyMeta .time { color: #666; font-size: 12px; margin-top: 2px; }
+    .historyMeta .line { color:#333; margin-top: 2px; }
 
-  .priceRow { margin-top: 10px; display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
-  .priceBox { border:1px solid #eee; border-radius:10px; padding:10px; background:#fbfbfb; }
-  .priceLabel { font-size: 12px; color:#666; margin-bottom: 4px; }
-  .priceValue { font-size: 16px; font-weight: 900; color:#111; }
+    /* Result cards */
+    .resultWrap { display:flex; flex-direction: column; gap: 12px; }
+    .resultCard {
+      border: 1px solid #eee;
+      border-radius: 14px;
+      padding: 12px;
+      background: #fcfcfc;
+      display:flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .resultHeaderRow { display:flex; align-items:flex-start; justify-content: space-between; gap: 10px; }
+    .resultName { font-size: 22px; font-weight: 900; color:#111; line-height: 1.1; }
+    .resultType { font-size: 12px; color:#666; margin-top: 3px; font-weight: 700; }
 
-  .confidence { margin-top: 8px; display:inline-flex; align-items:center; gap:8px; }
-  .dot { width:10px; height:10px; border-radius:99px; display:inline-block; }
-  .dot.high { background:#1a8f2a; }
-  .dot.medium { background:#c28b00; }
-  .dot.low { background:#b00020; }
-  .confLabel { font-size: 13px; font-weight: 900; color:#111; }
+    .priceGrid { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    @media (max-width: 520px) { .priceGrid { grid-template-columns: 1fr; } }
 
-  .notesBox { border: 1px dashed #ddd; background: #fffdf6; padding: 10px; border-radius: 10px; line-height: 1.35; }
-  .notesTitle { font-weight: 900; margin-bottom: 4px; }
+    .priceBox {
+      border: 1px solid #eee;
+      border-radius: 14px;
+      background: #fff;
+      padding: 12px;
+    }
+    .priceLabel { font-size: 12px; color:#666; font-weight: 800; margin-bottom: 6px; }
+    .priceValue { font-size: 22px; font-weight: 900; color:#111; }
 
-  /* Team history */
-  .historyList { display:flex; flex-direction:column; gap:10px; margin-top: 10px; }
-  .historyItem {
-    display:grid;
-    grid-template-columns: 72px 1fr;
-    gap: 10px;
-    align-items:center;
-    border: 2px solid #eee;
-    border-radius: 12px;
-    padding: 8px;
-    cursor: pointer;
-    background:#fff;
-  }
-  .historyItem.active { border-color:#2b7cff; box-shadow: 0 0 0 2px rgba(43,124,255,.15) inset; }
-  .thumb { width:72px; height:72px; object-fit:cover; border-radius:10px; border:1px solid #eee; background:#fafafa; }
-  .historyMeta { font-size: 13px; color:#444; }
-  .historyMeta .title { font-weight: 900; color:#111; margin-bottom: 2px; }
-  .historyMeta .time { color:#666; font-size: 12px; }
+    details { border: 1px solid #eee; border-radius: 14px; background:#fff; padding: 10px 12px; }
+    summary { cursor:pointer; font-weight: 900; color:#222; }
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #f7f7f7;
+      border: 1px solid #eee;
+      padding: 10px;
+      border-radius: 12px;
+      margin: 10px 0 0;
+    }
 
-  details { margin-top: 10px; }
-  pre { white-space: pre-wrap; word-break: break-word; background:#f7f7f7; border:1px solid #eee; padding:10px; border-radius:10px; margin: 8px 0 0; font-size: 12px; }
-</style>
+    .tipsBox {
+      background: #f6f6f6;
+      border: 1px solid #eee;
+      border-radius: 14px;
+      padding: 12px;
+      color:#333;
+      line-height: 1.35;
+    }
+    .tipsBox b { font-weight: 900; }
+    .small { font-size: 12px; color: #666; margin-top: 10px; }
+  </style>
 </head>
 
 <body>
+  <h1>Estate AI Scanner</h1>
+  <p class="sub">
+    Identify and price items fast for estate sales.
+    <br/>
+    <b>Start by choosing “One Item” or “Many Items”, then add up to 4 photos.</b>
+  </p>
 
-<h1>Estate AI Scanner</h1>
-<p class="sub">Identify and price items fast for your estate sale.</p>
+  <!-- Hidden inputs: Camera + Gallery -->
+  <input id="cameraInput" type="file" accept="image/*" capture="environment" style="display:none" />
+  <input id="galleryInput" type="file" accept="image/*" style="display:none" />
+  <input id="detailInput" type="file" accept="image/*" style="display:none" />
 
-<!-- Inputs -->
-<input id="cameraInput" type="file" accept="image/*" capture="environment" hidden />
-<input id="galleryInput" type="file" accept="image/*" hidden />
-<input id="detailInput" type="file" accept="image/*" multiple hidden />
-<input id="refineInput" type="file" accept="image/*" multiple hidden />
-
-<div class="hero">
-  <div class="steps">
-    <b>Step 1:</b> Add photos<br>
-    <b>Step 2:</b> Choose what you’re pricing (one item or many)<br>
-    <b>Step 3:</b> Tap <b>“What is this?”</b>
-  </div>
-
-  <div class="ctaRow">
-    <button class="cta primary" onclick="openCamera()">Take Photo</button>
-    <button class="cta" onclick="openGallery()">Choose Photos</button>
-    <button class="cta" onclick="addDetail()">Add Close-up</button>
-  </div>
-
-  <div class="modeWrap" style="margin-top:12px;">
-    <div id="modeSingle" class="modeTile" onclick="selectMode('single')">
-      <div class="modeTitle">✅ Price one item</div>
-      <div class="modeSub">Use for one object (or one main object). We’ll still give a “bundle” range if helpful.</div>
-    </div>
-    <div id="modeMulti" class="modeTile" onclick="selectMode('multi')">
-      <div class="modeTitle">✅ Price many items</div>
-      <div class="modeSub">Use for a table/shelf/room photo. We’ll identify up to 8 items + total bundle range.</div>
+  <!-- Modal -->
+  <div id="modalBackdrop" class="modalBackdrop" onclick="closeModal(event)">
+    <div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
+      <div class="modalHeader">
+        <strong id="modalTitle">Info</strong>
+        <button class="modalClose" onclick="hideModal()">Close</button>
+      </div>
+      <div class="modalBody" id="modalBody"></div>
+      <div class="modalFooter">
+        <button class="modalClose" onclick="hideModal()">Got it</button>
+      </div>
     </div>
   </div>
 
-  <div style="margin-top:12px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
-    <button id="analyzeBtn" class="primary" onclick="analyze()" disabled>What is this?</button>
-    <button onclick="refreshTeamHistory()">Refresh Team History</button>
-    <div id="gateHint" style="color:#666; font-size: 13px;">Add at least 1 photo and choose a mode to continue.</div>
+  <!-- Step 1 -->
+  <div class="stepBox">
+    <div class="stepTitle">Step 1 — Price mode (required)</div>
+    <div class="stepRow">
+      <div class="modeChoice" id="modeOneBox" onclick="setMode('single')">
+        <input id="modeOne" type="checkbox" />
+        <div class="modeText">
+          <div class="label">One Item</div>
+          <div class="desc">Best for one main object (e.g., one vase, one tool, one book).</div>
+        </div>
+        <span class="infoIcon" title="When to use One Item" onclick="openModeInfo(event,'single')">i</span>
+      </div>
+
+      <div class="modeChoice" id="modeManyBox" onclick="setMode('multi')">
+        <input id="modeMany" type="checkbox" />
+        <div class="modeText">
+          <div class="label">Many Items</div>
+          <div class="desc">Best for a table/shelf of items or a “lot” photo.</div>
+        </div>
+        <span class="infoIcon" title="When to use Many Items" onclick="openModeInfo(event,'multi')">i</span>
+      </div>
+    </div>
+    <div class="stepHint" id="modeHint">
+      Choose a mode to unlock photo + analysis buttons.
+    </div>
   </div>
-</div>
 
-<div class="grid">
+  <!-- Step 2 -->
+  <div class="stepBox">
+    <div class="stepTitle">Step 2 — Add photos (up to 4)</div>
+    <div class="controls">
+      <button id="cameraBtn" onclick="openCamera()" disabled>Use Camera</button>
+      <button id="galleryBtn" onclick="openGallery()" disabled>Choose From Photos</button>
+      <button id="detailBtn" onclick="openDetail()" disabled>Add Detail Photo</button>
 
-  <div class="card">
-    <h3>Preview</h3>
-    <div id="previewContainer">
+      <button id="analyzeBtn" class="primary" onclick="analyze()" disabled>Identify and Price my item(s)</button>
+
+      <button onclick="refreshTeamHistory()">Refresh Team History</button>
+      <button onclick="clearLocalHistory()">Clear Local History</button>
+    </div>
+
+    <div class="tipsBox">
+      <b>Scan tips:</b>
+      <ul style="margin: 8px 0 0 18px;">
+        <li>Add close-up photos of stamps, markings, signatures, or crisp edges.</li>
+        <li>If results are unclear or items are missed, take a brighter and closer photo.</li>
+      </ul>
+      <div style="margin-top:10px;">
+        <b>Limits:</b> Max photos per scan: <b>4</b>. Max items in multi-item mode: <b>8</b>.
+      </div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h3>Preview</h3>
       <img id="preview" alt="Preview" />
-    </div>
-    <div id="previewStrip" class="previewStrip"></div>
+      <div id="previewHint" class="status">Choose a price mode, then add a photo to begin.</div>
 
-    <div class="tipBox">
-      <b>Scan tips:</b><br>
-      • Add close-up photos of stamps, markings, signatures, or crisp edges.<br>
-      • If results are unclear or items are missed, take a brighter and closer photo.<br><br>
-      <b>Limits:</b> Max photos per scan: <b>4</b>. Max items in multi-item mode: <b>8</b>.
-    </div>
-  </div>
-
-  <div class="card">
-    <h3>Result</h3>
-    <div id="status" class="status"></div>
-
-    <div id="result" class="resultWrap"></div>
-
-    <div id="refineBox" style="margin-top:12px; display:none;">
-      <button class="primary" onclick="openRefine()">Refine with close-up photos</button>
-      <div style="margin-top:6px; color:#666; font-size: 13px;">
-        Add close-ups of markings, stamps, signatures, labels, or pattern names to improve accuracy.
-      </div>
+      <div class="small" id="photoCount"></div>
     </div>
 
-    <details>
-      <summary>Show raw JSON</summary>
-      <pre id="raw"></pre>
-    </details>
+    <div class="card">
+      <h3>Result</h3>
+      <div id="status" class="status"></div>
+      <div id="result" class="resultWrap"></div>
+      <div id="rawWrap" style="margin-top:10px; display:none;"></div>
+    </div>
 
-    <div style="margin-top:14px;">
-      <h3 style="margin-bottom:8px;">Team History (shared)</h3>
+    <div class="card" style="grid-column: 1 / -1;">
+      <h3>Team History (shared)</h3>
       <div id="teamHistory" class="historyList"></div>
-      <div id="teamEmpty" class="status" style="color:#666;">No team scans yet.</div>
+      <div id="teamEmpty" class="status">No team scans yet.</div>
+    </div>
+
+    <div class="card" style="grid-column: 1 / -1;">
+      <h3>Local History (this device)</h3>
+      <div id="history" class="historyList"></div>
+      <div id="historyEmpty" class="status">No local scans saved yet.</div>
     </div>
   </div>
 
-</div>
+  <script>
+    // =========================
+    // Elements
+    // =========================
+    const cameraInput = document.getElementById("cameraInput");
+    const galleryInput = document.getElementById("galleryInput");
+    const detailInput = document.getElementById("detailInput");
 
-<script>
-  const cameraInput = document.getElementById("cameraInput");
-  const galleryInput = document.getElementById("galleryInput");
-  const detailInput = document.getElementById("detailInput");
-  const refineInput = document.getElementById("refineInput");
+    const preview = document.getElementById("preview");
+    const previewHint = document.getElementById("previewHint");
+    const photoCountEl = document.getElementById("photoCount");
 
-  const preview = document.getElementById("preview");
-  const previewStrip = document.getElementById("previewStrip");
-  const statusEl = document.getElementById("status");
-  const resultEl = document.getElementById("result");
-  const rawEl = document.getElementById("raw");
+    const statusEl = document.getElementById("status");
+    const resultEl = document.getElementById("result");
+    const rawWrap = document.getElementById("rawWrap");
 
-  const analyzeBtn = document.getElementById("analyzeBtn");
-  const gateHint = document.getElementById("gateHint");
+    const analyzeBtn = document.getElementById("analyzeBtn");
+    const cameraBtn = document.getElementById("cameraBtn");
+    const galleryBtn = document.getElementById("galleryBtn");
+    const detailBtn = document.getElementById("detailBtn");
 
-  const refineBox = document.getElementById("refineBox");
+    const modeOne = document.getElementById("modeOne");
+    const modeMany = document.getElementById("modeMany");
+    const modeOneBox = document.getElementById("modeOneBox");
+    const modeManyBox = document.getElementById("modeManyBox");
+    const modeHint = document.getElementById("modeHint");
 
-  const teamHistoryEl = document.getElementById("teamHistory");
-  const teamEmptyEl = document.getElementById("teamEmpty");
+    const historyEl = document.getElementById("history");
+    const historyEmptyEl = document.getElementById("historyEmpty");
 
-  const modeSingleEl = document.getElementById("modeSingle");
-  const modeMultiEl = document.getElementById("modeMulti");
+    const teamHistoryEl = document.getElementById("teamHistory");
+    const teamEmptyEl = document.getElementById("teamEmpty");
 
-  let selectedFiles = [];
-  let previewUrls = [];
-  let activePreviewIndex = 0;
+    const modalBackdrop = document.getElementById("modalBackdrop");
+    const modalTitle = document.getElementById("modalTitle");
+    const modalBody = document.getElementById("modalBody");
 
-  let selectedMode = null;        // forced pick
-  let lastScanId = null;          // for refine
-  let selectedHistoryId = null;   // highlight
+    // =========================
+    // Config
+    // =========================
+    const MAX_PHOTOS_PER_SCAN = 4;
+    const MAX_ITEMS_MULTI = 8;
 
-  const MAX_PHOTOS = 4;
+    const LOCAL_HISTORY_KEY = "estate_ai_local_history_v2";
+    const LOCAL_HISTORY_LIMIT = 25;
 
-  function escapeHtml(str) {
-    return String(str ?? "")
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#039;");
-  }
+    // =========================
+    // State
+    // =========================
+    let analysisMode = "";          // 'single' or 'multi' (forced)
+    let selectedFiles = [];         // up to 4
+    let selectedThumbDataUrl = null; // compressed thumb for local history
 
-  function formatTime(iso) {
-    try { return new Date(iso).toLocaleString(); }
-    catch { return iso; }
-  }
+    let lastSelectedTeamId = null;
+    let lastSelectedLocalIndex = null;
 
-  function setRaw(payload) { rawEl.textContent = JSON.stringify(payload, null, 2); }
-  function clearResult() { resultEl.innerHTML = ""; setRaw({}); refineBox.style.display = "none"; }
-
-  function openCamera() { cameraInput.value = ""; cameraInput.click(); }
-  function openGallery() { galleryInput.value = ""; galleryInput.click(); }
-  function addDetail() { detailInput.value = ""; detailInput.click(); }
-
-  function openRefine() { refineInput.value = ""; refineInput.click(); }
-
-  cameraInput.onchange = e => { clearSelected(); addFiles(e.target.files); };
-  galleryInput.onchange = e => { clearSelected(); addFiles(e.target.files); };
-  detailInput.onchange = e => addFiles(e.target.files);
-  refineInput.onchange = e => refineWithFiles(e.target.files);
-
-  function selectMode(mode) {
-    selectedMode = mode;
-    modeSingleEl.classList.toggle("active", mode === "single");
-    modeMultiEl.classList.toggle("active", mode === "multi");
-    updateGate();
-  }
-
-  function updateGate() {
-    const ok = (selectedFiles.length > 0) && !!selectedMode;
-    analyzeBtn.disabled = !ok;
-
-    if (!selectedMode && selectedFiles.length === 0) {
-      gateHint.textContent = "Add at least 1 photo and choose a mode to continue.";
-    } else if (!selectedMode) {
-      gateHint.textContent = "Choose a mode: Price one item or Price many items.";
-    } else if (selectedFiles.length === 0) {
-      gateHint.textContent = "Add at least 1 photo to continue.";
-    } else {
-      gateHint.textContent = `Ready ✅ (${selectedFiles.length} photo${selectedFiles.length>1?'s':''}, mode: ${selectedMode})`;
-    }
-  }
-
-  function clearSelected() {
-    selectedFiles = [];
-    previewUrls.forEach(u => URL.revokeObjectURL(u));
-    previewUrls = [];
-    activePreviewIndex = 0;
-    renderPreview();
-    updateGate();
-  }
-
-  function addFiles(files) {
-    if (!files || files.length === 0) return;
-
-    for (let file of files) {
-      if (selectedFiles.length >= MAX_PHOTOS) break;
-      selectedFiles.push(file);
-      previewUrls.push(URL.createObjectURL(file));
-    }
-    renderPreview();
-    updateGate();
-  }
-
-  function setActivePreview(idx) {
-    activePreviewIndex = idx;
-    if (previewUrls[idx]) preview.src = previewUrls[idx];
-    renderStrip();
-  }
-
-  function renderStrip() {
-    previewStrip.innerHTML = "";
-    previewUrls.forEach((url, i) => {
-      const img = document.createElement("img");
-      img.src = url;
-      img.className = "previewThumb" + (i === activePreviewIndex ? " active" : "");
-      img.onclick = () => setActivePreview(i);
-      previewStrip.appendChild(img);
-    });
-  }
-
-  function renderPreview() {
-    if (previewUrls.length > 0) preview.src = previewUrls[activePreviewIndex] || previewUrls[0];
-    else preview.removeAttribute("src");
-    renderStrip();
-  }
-
-  async function readJsonOrText(resp) {
-    const ct = (resp.headers.get("content-type") || "").toLowerCase();
-    const text = await resp.text();
-    if (ct.includes("application/json")) {
-      try { return JSON.parse(text); }
-      catch { return { error: "Invalid JSON response", raw: text }; }
-    }
-    return { error: "Non-JSON response from server", raw: text };
-  }
-
-  function renderError(payload, httpStatus) {
-    const msg = payload?.error || payload?.detail || "Error";
-    statusEl.innerHTML = `<span class="err">${escapeHtml(msg)}</span>${httpStatus ? ` (HTTP ${httpStatus})` : ""}`;
-    resultEl.innerHTML = `
-      <div class="notesBox">
-        <div class="notesTitle">What happened</div>
-        <div>${escapeHtml(payload?.details || payload?.raw || "Please try again.")}</div>
-      </div>
-    `;
-  }
-
-  function moneyRange(obj) {
-    if (!obj || typeof obj !== "object") return "";
-    const low = obj.low ?? obj.min ?? null;
-    const high = obj.high ?? obj.max ?? null;
-    if (low !== null && high !== null) return `$${low} – $${high}`;
-    if (low !== null) return `$${low}+`;
-    if (high !== null) return `Up to $${high}`;
-    return "";
-  }
-
-  function confidenceDot(level) {
-    const c = String(level || "").toLowerCase();
-    if (c === "high") return `<span class="dot high"></span><span class="confLabel">High confidence</span>`;
-    if (c === "medium") return `<span class="dot medium"></span><span class="confLabel">Medium confidence</span>`;
-    if (c === "low") return `<span class="dot low"></span><span class="confLabel">Low confidence</span>`;
-    return `<span class="dot medium"></span><span class="confLabel">Confidence unknown</span>`;
-  }
-
-  function renderStructured(payload) {
-    const data = payload?.result ? payload.result : payload;
-
-    const items = Array.isArray(data?.items) ? data.items : [];
-    const bundleRange = data?.bundle_price_range || null;
-
-    const pricingEstimates = data?.pricing_estimates || "";
-    const suggestionsObj = data?.suggestions || {};
-    const markingsTip = suggestionsObj?.markings_to_look_for || "";
-    const photoTip = suggestionsObj?.photo_tip || "";
-
-    const advice = Array.isArray(data?.advice) ? data.advice : [];
-
-    // If no items, show why + tips
-    if (!items.length) {
-      const box = document.createElement("div");
-      box.className = "notesBox";
-      box.innerHTML = `
-        <div class="notesTitle">No items detected</div>
-        <div>${escapeHtml(pricingEstimates || "The photo didn’t show distinct items clearly. Try a closer/brighter photo.")}</div>
-        ${photoTip ? `<div style="margin-top:8px;"><b>Photo tip:</b> ${escapeHtml(photoTip)}</div>` : ""}
-        ${markingsTip ? `<div style="margin-top:6px;"><b>Markings to look for:</b> ${escapeHtml(markingsTip)}</div>` : ""}
-      `;
-      resultEl.appendChild(box);
-      // allow refine
-      refineBox.style.display = lastScanId ? "block" : "none";
-      return;
+    // =========================
+    // Helpers
+    // =========================
+    function escapeHtml(str) {
+      return String(str ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
     }
 
-    // Bundle display
-    let bundleDisplay = "—";
-    if (bundleRange && typeof bundleRange === "object") {
-      const r = moneyRange(bundleRange);
-      if (r) bundleDisplay = r;
+    function nowIso() { return new Date().toISOString(); }
+
+    function formatTime(iso) {
+      try { return new Date(iso).toLocaleString(); } catch { return iso; }
     }
 
-    // Advice / tips box at top (if any)
-    const tipLines = [];
-    if (pricingEstimates) tipLines.push(`• ${pricingEstimates}`);
-    if (photoTip) tipLines.push(`• ${photoTip}`);
-    if (markingsTip) tipLines.push(`• ${markingsTip}`);
-    advice.forEach(a => tipLines.push(`• ${a}`));
-
-    if (tipLines.length) {
-      const box = document.createElement("div");
-      box.className = "notesBox";
-      box.innerHTML = `<div class="notesTitle">Improve accuracy</div>${tipLines.map(l => `<div>${escapeHtml(l)}</div>`).join("")}`;
-      resultEl.appendChild(box);
+    function stripCodeFences(s) {
+      return String(s ?? "").replace(/```json|```/gi, "").trim();
     }
 
-    // Item cards
-    items.forEach((it, idx) => {
-      const card = document.createElement("div");
-      card.className = "itemCard";
+    async function readJsonOrText(resp) {
+      const ct = resp.headers.get("content-type") || "";
+      if (ct.includes("application/json")) return await resp.json();
+      const text = await resp.text();
+      try { return JSON.parse(stripCodeFences(text)); } catch { return { detail: text }; }
+    }
 
-      const name = it?.name || it?.title || `Item ${idx + 1}`;
-      const type = it?.type || "";
-      const desc = it?.description || it?.details || it?.condition || "";
+    function formatMoney(x) {
+      if (x == null) return "—";
+      if (typeof x === "number") return `$${x}`;
+      if (typeof x === "string") return x.startsWith("$") ? x : x;
+      if (typeof x === "object") {
+        const low = x.low ?? x.min ?? 0;
+        const high = x.high ?? x.max ?? 0;
+        if (low && high) return `$${low} – $${high}`;
+        if (low && !high) return `$${low}+`;
+        if (!low && high) return `Up to $${high}`;
+      }
+      return "—";
+    }
 
-      // estimated_price can be number OR {low,high}
-      const ep = it?.estimated_price ?? it?.suggested_listing_price ?? null;
+    function bundleRangeText(bundle) {
+      if (!bundle || typeof bundle !== "object") return "—";
+      const min = bundle.min ?? bundle.low ?? 0;
+      const max = bundle.max ?? bundle.high ?? 0;
+      if (!min && !max) return "—";
+      if (min && max) return `$${min} – $${max}`;
+      if (min && !max) return `$${min}+`;
+      return `Up to $${max}`;
+    }
 
-      let individualDisplay = "—";
-      if (typeof ep === "number") individualDisplay = `$${ep}`;
-      else if (ep && typeof ep === "object") {
-        const r = moneyRange(ep);
-        if (r) individualDisplay = r;
-      } else if (typeof ep === "string" && ep.trim()) {
-        individualDisplay = ep;
+    function ensureModeChosen() {
+      const ok = (analysisMode === "single" || analysisMode === "multi");
+      cameraBtn.disabled = !ok;
+      galleryBtn.disabled = !ok;
+      detailBtn.disabled = !ok;
+
+      const hasPhotos = selectedFiles.length > 0;
+      analyzeBtn.disabled = !(ok && hasPhotos);
+
+      return ok;
+    }
+
+    // =========================
+    // Modal
+    // =========================
+    function showModal(title, html) {
+      modalTitle.textContent = title;
+      modalBody.innerHTML = html;
+      modalBackdrop.style.display = "flex";
+    }
+    function hideModal() {
+      modalBackdrop.style.display = "none";
+    }
+    function closeModal(e) {
+      // click outside modal closes
+      hideModal();
+    }
+
+    function openModeInfo(e, mode) {
+      e.stopPropagation();
+      if (mode === "single") {
+        showModal(
+          "When to use One Item",
+          `
+          <div>
+            Use <b>One Item</b> when you want the best accuracy on a single main object.
+            <ul>
+              <li>One vase, one lamp, one tool, one book, one piece of jewelry</li>
+              <li>Best when the item fills most of the photo</li>
+              <li>Use <b>Add Detail Photo</b> for markings, stamps, signatures, labels</li>
+            </ul>
+          </div>
+          `
+        );
+      } else {
+        showModal(
+          "When to use Many Items",
+          `
+          <div>
+            Use <b>Many Items</b> for a group/lot photo (table, shelf, pile, box).
+            <ul>
+              <li>We’ll identify up to <b>${MAX_ITEMS_MULTI}</b> distinct items</li>
+              <li>Also returns a suggested <b>bundle / lot range</b></li>
+              <li>If something is missed, take a brighter/closer photo (or crop)</li>
+            </ul>
+          </div>
+          `
+        );
+      }
+    }
+
+    // =========================
+    // Step 1: Mode selection (checkbox style, mutually exclusive)
+    // =========================
+    function setMode(mode) {
+      analysisMode = (mode === "multi") ? "multi" : "single";
+
+      // Mutually exclusive checkboxes
+      modeOne.checked = (analysisMode === "single");
+      modeMany.checked = (analysisMode === "multi");
+
+      // Visual
+      modeOneBox.classList.toggle("selected", analysisMode === "single");
+      modeManyBox.classList.toggle("selected", analysisMode === "multi");
+
+      modeHint.innerHTML = `<span class="ok">Selected:</span> ${analysisMode === "single" ? "One Item" : "Many Items"}. Now add photo(s).`;
+
+      previewHint.textContent = "Add a photo to begin.";
+      ensureModeChosen();
+    }
+
+    // Prevent direct checkbox toggles causing both off
+    modeOne.addEventListener("click", (e) => { e.preventDefault(); setMode("single"); });
+    modeMany.addEventListener("click", (e) => { e.preventDefault(); setMode("multi"); });
+
+    // =========================
+    // Photo selection / preview
+    // =========================
+    function openCamera() { if (!ensureModeChosen()) return; cameraInput.value = ""; cameraInput.click(); }
+    function openGallery() { if (!ensureModeChosen()) return; galleryInput.value = ""; galleryInput.click(); }
+    function openDetail() { if (!ensureModeChosen()) return; detailInput.value = ""; detailInput.click(); }
+
+    async function compressToThumb(file, maxW = 360, quality = 0.65) {
+      // Returns small JPEG dataURL to avoid localStorage quota issues
+      const imgUrl = URL.createObjectURL(file);
+      const img = new Image();
+      img.src = imgUrl;
+      await img.decode().catch(() => {});
+      const canvas = document.createElement("canvas");
+      const scale = Math.min(1, maxW / (img.width || maxW));
+      canvas.width = Math.max(1, Math.round((img.width || maxW) * scale));
+      canvas.height = Math.max(1, Math.round((img.height || maxW) * scale));
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(imgUrl);
+      return canvas.toDataURL("image/jpeg", quality);
+    }
+
+    async function addFiles(files) {
+      if (!ensureModeChosen()) return;
+
+      const arr = Array.from(files || []).filter(Boolean);
+      if (!arr.length) return;
+
+      // Enforce max 4 total
+      const remaining = MAX_PHOTOS_PER_SCAN - selectedFiles.length;
+      const toAdd = arr.slice(0, remaining);
+
+      selectedFiles = selectedFiles.concat(toAdd);
+
+      // Preview uses first image
+      const first = selectedFiles[0];
+      if (first) {
+        const objUrl = URL.createObjectURL(first);
+        preview.src = objUrl;
+        preview.style.display = "block";
+        previewHint.textContent = "Ready to analyze.";
+        // set a compressed thumb from first photo for local history
+        selectedThumbDataUrl = await compressToThumb(first);
+        // clean object URL after the image loads
+        preview.onload = () => URL.revokeObjectURL(objUrl);
       }
 
-      const conf = it?.confidence || "medium";
+      photoCountEl.textContent = `Photos selected: ${selectedFiles.length} / ${MAX_PHOTOS_PER_SCAN}`;
+      ensureModeChosen();
+    }
 
-      const setNotes = it?.set_collection_notes || {};
-      const isSet = setNotes?.is_part_of_set_likely || "unknown";
-      const whatToCheck = Array.isArray(setNotes?.what_to_check) ? setNotes.what_to_check : [];
-      const impact = setNotes?.price_impact || "";
+    cameraInput.addEventListener("change", async () => addFiles(cameraInput.files));
+    galleryInput.addEventListener("change", async () => addFiles(galleryInput.files));
+    detailInput.addEventListener("change", async () => addFiles(detailInput.files));
 
-      card.innerHTML = `
-        <div class="itemTitleRow">
-          <div class="itemTitle">${escapeHtml(name)}</div>
-          <div class="badge">Shared with your team</div>
-        </div>
+    // =========================
+    // Local history (compressed thumbs)
+    // =========================
+    function readLocalHistory() {
+      try {
+        const raw = localStorage.getItem(LOCAL_HISTORY_KEY);
+        return raw ? JSON.parse(raw) : [];
+      } catch {
+        return [];
+      }
+    }
 
-        <div class="meta">
-          ${type ? `<div><b>Type:</b> ${escapeHtml(type)}</div>` : ""}
-          ${desc ? `<div><b>Description:</b> ${escapeHtml(desc)}</div>` : ""}
-        </div>
+    function writeLocalHistory(items) {
+      try {
+        localStorage.setItem(LOCAL_HISTORY_KEY, JSON.stringify(items));
+      } catch (e) {
+        // If quota is exceeded, fall back to saving without thumbs
+        console.warn("LocalStorage quota issue, saving without thumbnails.", e);
+        const stripped = items.map(x => ({ ...x, thumb: null }));
+        try { localStorage.setItem(LOCAL_HISTORY_KEY, JSON.stringify(stripped)); } catch {}
+      }
+    }
 
-        <div class="priceRow">
-          <div class="priceBox">
-            <div class="priceLabel">Suggested listing price</div>
-            <div class="priceValue">${escapeHtml(individualDisplay)}</div>
+    function addToLocalHistory(entry) {
+      const items = readLocalHistory();
+      items.unshift(entry);
+      writeLocalHistory(items.slice(0, LOCAL_HISTORY_LIMIT));
+      renderLocalHistory();
+    }
+
+    function clearLocalHistory() {
+      localStorage.removeItem(LOCAL_HISTORY_KEY);
+      renderLocalHistory();
+      statusEl.textContent = "";
+      resultEl.innerHTML = "";
+      rawWrap.style.display = "none";
+    }
+
+    function renderLocalHistory() {
+      const items = readLocalHistory();
+      historyEl.innerHTML = "";
+
+      if (!items.length) {
+        historyEmptyEl.style.display = "block";
+        return;
+      }
+      historyEmptyEl.style.display = "none";
+
+      items.forEach((item, idx) => {
+        const title = item?.title || "Scan";
+        const time = item?.created_at ? formatTime(item.created_at) : "";
+        const price = item?.primary_price || "";
+        const bundle = item?.bundle_range || "";
+
+        const div = document.createElement("div");
+        div.className = "historyItem";
+        if (lastSelectedLocalIndex === idx) div.classList.add("selected");
+        div.onclick = () => openLocalHistoryItem(idx);
+
+        const thumb = item.thumb;
+        const thumbHtml = thumb
+          ? `<img class="thumb" src="${escapeHtml(thumb)}" alt="thumb" />`
+          : `<div class="thumb thumbPlaceholder">No thumb</div>`;
+
+        div.innerHTML = `
+          ${thumbHtml}
+          <div class="historyMeta">
+            <div class="title">${escapeHtml(title)}</div>
+            <div class="line">${escapeHtml(price)} ${bundle ? " • " + escapeHtml(bundle) : ""}</div>
+            <div class="time">${escapeHtml(time)}</div>
           </div>
-          <div class="priceBox">
-            <div class="priceLabel">Bundle / range</div>
-            <div class="priceValue">${escapeHtml(bundleDisplay)}</div>
+        `;
+        historyEl.appendChild(div);
+      });
+    }
+
+    function openLocalHistoryItem(index) {
+      const items = readLocalHistory();
+      const item = items[index];
+      if (!item) return;
+
+      lastSelectedLocalIndex = index;
+      lastSelectedTeamId = null;
+      renderLocalHistory();
+      renderTeamHistory(_lastTeamItems);
+
+      statusEl.innerHTML = `<span class="ok">Loaded ✅</span>`;
+      renderNormalizedResult(item.payload);
+
+      // Preview thumb if available
+      if (item.thumb) {
+        preview.src = item.thumb;
+        preview.style.display = "block";
+        previewHint.textContent = "Loaded from local history.";
+      }
+    }
+
+    // =========================
+    // Team history (shared)
+    // =========================
+    let _lastTeamItems = [];
+    function renderTeamHistory(items) {
+      _lastTeamItems = items || [];
+      teamHistoryEl.innerHTML = "";
+      if (!items || !items.length) {
+        teamEmptyEl.style.display = "block";
+        return;
+      }
+      teamEmptyEl.style.display = "none";
+
+      items.forEach((item) => {
+        const title = item?.title || item?.result?.items?.[0]?.name || "Scan";
+        const time = item?.created_at ? formatTime(item.created_at) : "";
+        const imgSrc = item.image_url || "";
+
+        // Compute primary price + bundle for display
+        const primaryItem = item?.result?.items?.[0] || {};
+        const primaryPrice = formatMoney(primaryItem.estimated_price);
+        const bundle = bundleRangeText(item?.result?.bundle_price_range);
+
+        const div = document.createElement("div");
+        div.className = "historyItem";
+        if (String(lastSelectedTeamId) === String(item.scan_id)) div.classList.add("selected");
+
+        div.onclick = () => {
+          lastSelectedTeamId = item.scan_id;
+          lastSelectedLocalIndex = null;
+          renderTeamHistory(_lastTeamItems);
+          renderLocalHistory();
+
+          if (imgSrc) {
+            preview.src = imgSrc;
+            preview.style.display = "block";
+            previewHint.textContent = "Loaded from team history.";
+          }
+
+          statusEl.innerHTML = `<span class="ok">Loaded ✅</span>`;
+          renderNormalizedResult(item);
+        };
+
+        div.innerHTML = `
+          <img class="thumb" src="${escapeHtml(imgSrc)}" alt="thumb" />
+          <div class="historyMeta">
+            <div class="title">${escapeHtml(title)}</div>
+            <div class="line">${escapeHtml(primaryPrice)} ${bundle !== "—" ? " • " + escapeHtml(bundle) : ""}</div>
+            <div class="time">${escapeHtml(time)}</div>
+            <div style="margin-top:6px;"><span class="pill sharedPill">Shared with your team</span></div>
           </div>
-        </div>
+        `;
+        teamHistoryEl.appendChild(div);
+      });
+    }
 
-        <div class="confidence">${confidenceDot(conf)}</div>
+    async function refreshTeamHistory() {
+      try {
+        const resp = await fetch("/history?limit=25");
+        if (!resp.ok) return;
+        const data = await resp.json();
+        renderTeamHistory(data.items || []);
+      } catch (e) {
+        console.error(e);
+      }
+    }
 
-        <div class="notesBox" style="margin-top:10px;">
-          <div class="notesTitle">Set / Collection notes</div>
-          <div><b>Part of a set likely:</b> ${escapeHtml(isSet)}</div>
-          ${whatToCheck.length ? `<div style="margin-top:6px;"><b>What to check:</b><br>${whatToCheck.map(x => `• ${escapeHtml(x)}`).join("<br>")}</div>` : ""}
-          ${impact ? `<div style="margin-top:6px;"><b>Price impact:</b> ${escapeHtml(impact)}</div>` : ""}
-        </div>
+    // =========================
+    // Result rendering (NEW normalized JSON)
+    // Expects backend response:
+    // { scan_id, created_at, analysis_mode, result: { items, bundle_price_range, pricing_estimates, suggestions, advice } }
+    // Team history items:
+    // { scan_id, created_at, analysis_mode, title, image_url, result }
+    // =========================
+    function renderNormalizedResult(payload) {
+      rawWrap.style.display = "none";
+      rawWrap.innerHTML = "";
+
+      let scan_id = payload?.scan_id;
+      let created_at = payload?.created_at;
+      let analysis_mode = payload?.analysis_mode;
+      let result = payload?.result;
+
+      // In local history, we store the whole API response as payload
+      if (payload?.payload) {
+        scan_id = payload.payload.scan_id;
+        created_at = payload.payload.created_at;
+        analysis_mode = payload.payload.analysis_mode;
+        result = payload.payload.result;
+      }
+
+      const items = result?.items || [];
+      const bundle = result?.bundle_price_range || {};
+      const suggestions = result?.suggestions || {};
+      const advice = result?.advice || [];
+      const pricing_estimates = result?.pricing_estimates || "";
+
+      resultEl.innerHTML = "";
+
+      if (!items.length) {
+        resultEl.innerHTML = `
+          <div class="resultCard">
+            <div class="resultHeaderRow">
+              <div>
+                <div class="resultName">Result</div>
+                <div class="resultType">No items detected</div>
+              </div>
+              <span class="pill sharedPill">Shared with your team</span>
+            </div>
+            <div style="color:#333; font-weight:700;">
+              No items detected. Try a closer/brighter photo or check raw JSON.
+            </div>
+          </div>
+        `;
+      } else {
+        items.forEach((it) => {
+          const name = it?.name || "Unknown item";
+          const type = it?.type || "Item";
+          const conf = (it?.confidence || "medium").toLowerCase();
+          const confLabel = conf === "high" ? "High confidence" : (conf === "low" ? "Low confidence" : "Medium confidence");
+
+          const est = formatMoney(it?.estimated_price);
+          const bundleText = bundleRangeText(bundle);
+
+          const setNotes = it?.set_collection_notes || {};
+          const setLikely = (setNotes?.is_part_of_set_likely || "unknown").toLowerCase();
+          const setImpact = setNotes?.price_impact || "";
+          const checks = Array.isArray(setNotes?.what_to_check) ? setNotes.what_to_check : [];
+
+          resultEl.innerHTML += `
+            <div class="resultCard">
+              <div class="resultHeaderRow">
+                <div>
+                  <div class="resultName">${escapeHtml(name)}</div>
+                  <div class="resultType">${escapeHtml(type)} • ${escapeHtml(confLabel)}</div>
+                </div>
+                <span class="pill sharedPill">Shared with your team</span>
+              </div>
+
+              <div class="priceGrid">
+                <div class="priceBox">
+                  <div class="priceLabel">Suggested listing price</div>
+                  <div class="priceValue">${escapeHtml(est)}</div>
+                </div>
+                <div class="priceBox">
+                  <div class="priceLabel">Bundle / range</div>
+                  <div class="priceValue">${escapeHtml(bundleText)}</div>
+                </div>
+              </div>
+
+              ${setImpact || checks.length ? `
+                <div style="margin-top:2px; color:#333;">
+                  <div style="font-weight:900; margin-bottom:4px;">Set / collection notes</div>
+                  <div style="font-size:13px; color:#444;">
+                    <div><b>Part of a set?</b> ${escapeHtml(setLikely)}</div>
+                    ${setImpact ? `<div style="margin-top:4px;"><b>Price impact:</b> ${escapeHtml(setImpact)}</div>` : ""}
+                    ${checks.length ? `
+                      <div style="margin-top:6px;"><b>What to check:</b>
+                        <ul style="margin:6px 0 0 18px;">
+                          ${checks.slice(0,6).map(x => `<li>${escapeHtml(x)}</li>`).join("")}
+                        </ul>
+                      </div>` : ""
+                    }
+                  </div>
+                </div>
+              ` : ""}
+
+              ${pricing_estimates ? `
+                <div style="margin-top:2px;">
+                  <div style="font-weight:900; margin-bottom:4px;">Pricing notes</div>
+                  <div style="font-size:13px; color:#444;">${escapeHtml(pricing_estimates)}</div>
+                </div>
+              ` : ""}
+
+              ${(suggestions?.photo_tip || suggestions?.markings_to_look_for) ? `
+                <div style="margin-top:2px;">
+                  <div style="font-weight:900; margin-bottom:4px;">Suggestions</div>
+                  <div style="font-size:13px; color:#444;">
+                    ${suggestions?.photo_tip ? `<div>• ${escapeHtml(suggestions.photo_tip)}</div>` : ""}
+                    ${suggestions?.markings_to_look_for ? `<div>• ${escapeHtml(suggestions.markings_to_look_for)}</div>` : ""}
+                  </div>
+                </div>
+              ` : ""}
+
+              ${Array.isArray(advice) && advice.length ? `
+                <div style="margin-top:2px;">
+                  <div style="font-weight:900; margin-bottom:4px;">Advice</div>
+                  <ul style="margin:6px 0 0 18px; font-size:13px; color:#444;">
+                    ${advice.slice(0,6).map(x => `<li>${escapeHtml(x)}</li>`).join("")}
+                  </ul>
+                </div>
+              ` : ""}
+
+            </div>
+          `;
+        });
+      }
+
+      // Raw JSON toggle
+      rawWrap.style.display = "block";
+      rawWrap.innerHTML = `
+        <details>
+          <summary>Show raw JSON</summary>
+          <pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre>
+        </details>
       `;
-
-      resultEl.appendChild(card);
-    });
-
-    // enable refine
-    refineBox.style.display = lastScanId ? "block" : "none";
-  }
-
-  async function analyze() {
-    if (!selectedMode) {
-      statusEl.innerHTML = `<span class="err">Choose “Price one item” or “Price many items” first.</span>`;
-      return;
-    }
-    if (selectedFiles.length === 0) {
-      statusEl.innerHTML = `<span class="err">Add at least one photo first.</span>`;
-      return;
     }
 
-    analyzeBtn.disabled = true;
-    statusEl.textContent = "Analyzing…";
-    clearResult();
+    // =========================
+    // Analyze
+    // =========================
+    async function analyze() {
+      if (!ensureModeChosen()) {
+        statusEl.innerHTML = `<span class="err">Choose One Item or Many Items first.</span>`;
+        return;
+      }
+      if (!selectedFiles.length) {
+        statusEl.innerHTML = `<span class="err">Add a photo first.</span>`;
+        return;
+      }
 
-    const formData = new FormData();
-    selectedFiles.forEach(f => formData.append("images", f));
-    formData.append("analysis_mode", selectedMode);
+      analyzeBtn.disabled = true;
+      statusEl.textContent = "Analyzing…";
+      resultEl.innerHTML = "";
+      rawWrap.style.display = "none";
 
-    try {
-      const resp = await fetch("/analyze-image", { method: "POST", body: formData });
-      const payload = await readJsonOrText(resp);
-      setRaw(payload);
+      const formData = new FormData();
+      // backend expects "images" list
+      selectedFiles.slice(0, MAX_PHOTOS_PER_SCAN).forEach(f => formData.append("images", f));
+      formData.append("analysis_mode", analysisMode);
 
-      if (!resp.ok) { renderError(payload, resp.status); return; }
-      if (payload?.error) { renderError(payload); return; }
+      try {
+        const resp = await fetch("/analyze-image", { method: "POST", body: formData });
+        const data = await readJsonOrText(resp);
 
-      lastScanId = payload.scan_id || null;
-
-      statusEl.innerHTML = `<span class="ok">Done ✅</span>`;
-      renderStructured(payload);
-
-      await refreshTeamHistory();
-
-    } catch (e) {
-      renderError({ error: "Network error", details: String(e?.message || e) });
-    } finally {
-      analyzeBtn.disabled = false;
-    }
-  }
-
-  async function refineWithFiles(files) {
-    if (!lastScanId) {
-      statusEl.innerHTML = `<span class="err">No prior scan to refine yet.</span>`;
-      return;
-    }
-    if (!files || files.length === 0) return;
-
-    const list = Array.from(files).slice(0, MAX_PHOTOS);
-
-    analyzeBtn.disabled = true;
-    statusEl.textContent = "Refining…";
-    clearResult();
-
-    const formData = new FormData();
-    formData.append("scan_id", String(lastScanId));
-    list.forEach(f => formData.append("images", f));
-
-    try {
-      const resp = await fetch("/refine", { method: "POST", body: formData });
-      const payload = await readJsonOrText(resp);
-      setRaw(payload);
-
-      if (!resp.ok) { renderError(payload, resp.status); return; }
-      if (payload?.error) { renderError(payload); return; }
-
-      lastScanId = payload.scan_id || lastScanId;
-
-      statusEl.innerHTML = `<span class="ok">Done ✅</span>`;
-      renderStructured(payload);
-
-      await refreshTeamHistory();
-
-    } catch (e) {
-      renderError({ error: "Network error", details: String(e?.message || e) });
-    } finally {
-      analyzeBtn.disabled = false;
-    }
-  }
-
-  function setHistoryActive(id) {
-    selectedHistoryId = id;
-    // update highlight
-    Array.from(teamHistoryEl.children).forEach(el => {
-      el.classList.toggle("active", el.getAttribute("data-id") === String(id));
-    });
-  }
-
-  function renderTeamHistory(items) {
-    teamHistoryEl.innerHTML = "";
-    if (!items || !items.length) {
-      teamEmptyEl.style.display = "block";
-      return;
-    }
-    teamEmptyEl.style.display = "none";
-
-    items.forEach((item) => {
-      const r = item?.result || {};
-      const its = Array.isArray(r.items) ? r.items : [];
-      const title = item.title || (its[0]?.name || "Scan");
-      const time = item.created_at ? formatTime(item.created_at) : "";
-
-      const bundle = r.bundle_price_range || {};
-      const bundleDisplay = moneyRange(bundle) || "—";
-
-      const imgSrc = item.image_url || "";
-
-      const div = document.createElement("div");
-      div.className = "historyItem";
-      div.setAttribute("data-id", String(item.scan_id));
-      if (selectedHistoryId === item.scan_id) div.classList.add("active");
-
-      div.onclick = () => {
-        setHistoryActive(item.scan_id);
-
-        // Load preview image (thumb)
-        if (imgSrc) {
-          preview.src = imgSrc;
+        if (!resp.ok) {
+          const msg = data?.detail || data?.error || `Server error ${resp.status}`;
+          throw new Error(msg);
         }
 
-        // Render this result
-        statusEl.innerHTML = `<span class="ok">Loaded ✅</span>`;
-        lastScanId = item.scan_id;
-        clearResult();
-        setRaw(item);
-        renderStructured(item);
-      };
+        statusEl.innerHTML = `<span class="ok">Done ✅</span>`;
+        renderNormalizedResult(data);
 
-      div.innerHTML = `
-        <img class="thumb" src="${escapeHtml(imgSrc)}" alt="thumb" />
-        <div class="historyMeta">
-          <div class="title">${escapeHtml(title)}</div>
-          <div>${escapeHtml(bundleDisplay)}</div>
-          <div class="time">${escapeHtml(time)}</div>
-          <div style="margin-top:6px;"><span class="badge">Shared with your team</span></div>
-        </div>
-      `;
+        // Save local history (compressed thumb + important summary)
+        const firstItem = data?.result?.items?.[0] || {};
+        const title = firstItem?.name || "Scan";
+        const primaryPrice = formatMoney(firstItem?.estimated_price);
+        const bundle = bundleRangeText(data?.result?.bundle_price_range);
 
-      teamHistoryEl.appendChild(div);
-    });
-  }
+        addToLocalHistory({
+          created_at: data?.created_at || nowIso(),
+          title,
+          primary_price: primaryPrice,
+          bundle_range: bundle,
+          thumb: selectedThumbDataUrl,
+          payload: data
+        });
 
-  async function refreshTeamHistory() {
-    try {
-      const resp = await fetch("/history?limit=25");
-      if (!resp.ok) return;
-      const data = await resp.json();
-      renderTeamHistory(data.items || []);
-    } catch (e) {
-      console.error(e);
+        // Refresh shared team history
+        await refreshTeamHistory();
+
+      } catch (e) {
+        console.error(e);
+        statusEl.innerHTML = `<span class="err">Error:</span> ${escapeHtml(e.message)}`;
+        resultEl.innerHTML = "";
+      } finally {
+        analyzeBtn.disabled = false;
+      }
     }
-  }
 
-  // init
-  updateGate();
-  refreshTeamHistory();
-</script>
-
+    // =========================
+    // Init
+    // =========================
+    renderLocalHistory();
+    refreshTeamHistory();
+    ensureModeChosen();
+  </script>
 </body>
 </html>
