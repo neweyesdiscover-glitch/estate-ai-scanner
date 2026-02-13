@@ -1,9 +1,10 @@
 <!-- frontend/index.html
-     ✅ Estate AI Scanner — Camera + Local History + Shared Team History
-     - NO login logic in frontend (backend handles /login redirect)
-     - "Use Camera" opens rear camera on phones
-     - Local History saved per device (localStorage) (kept minimal to avoid quota)
-     - Team History pulled from server (shared)
+     ✅ Estate AI Scanner — Camera + Detail Photos + Local History + Team History
+     - Backend handles /login redirect (NO login logic here)
+     - Step 1 forces pricing mode choice (One vs Many)
+     - Step 2 add photos (1 main + up to 3 detail)
+     - Step 3 Analyze: "Identify and Price my item(s)"
+     - Fixes: Error [object Object], price objects, tap highlight
 -->
 
 <!doctype html>
@@ -13,219 +14,136 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Estate AI Scanner</title>
   <style>
-    body { font-family: Arial, sans-serif; padding: 24px; max-width: 1100px; margin: 0 auto; }
-    h1 { margin: 0 0 6px; }
-    .sub { margin: 0 0 16px; color: #555; }
+    :root {
+      --card-border: #e7e7e7;
+      --soft: #f7f7f7;
+      --text: #111;
+      --muted: #666;
+      --primary: #2b7cff;
+      --danger: #b00020;
+      --ok: #0a7a0a;
+      --shadow: 0 10px 30px rgba(0,0,0,0.06);
+    }
 
-    .grid { display: grid; grid-template-columns: 360px 1fr; gap: 18px; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; padding: 18px; max-width: 1100px; margin: 0 auto; color: var(--text); background: #fff; }
+    h1 { margin: 0 0 6px; font-size: 26px; }
+    .sub { margin: 0 0 16px; color: var(--muted); }
+
+    .grid { display: grid; grid-template-columns: 420px 1fr; gap: 16px; }
     @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
 
-    .card { border: 1px solid #ddd; border-radius: 14px; padding: 14px; background: #fff; }
-    .card h3 { margin: 0 0 10px; }
+    .card { border: 1px solid var(--card-border); border-radius: 18px; padding: 14px; background: #fff; box-shadow: var(--shadow); }
+    .card h3 { margin: 0 0 10px; font-size: 18px; }
+    .cardTitleRow { display:flex; align-items:center; justify-content:space-between; gap: 10px; }
 
-    button {
-      padding: 11px 14px;
-      border-radius: 10px;
-      border: 1px solid #ccc;
+    .stepHeader { display:flex; gap:12px; align-items:flex-start; margin-bottom: 10px; }
+    .stepNum {
+      width: 32px; height: 32px;
+      border-radius: 12px;
+      background: #111;
+      color: #fff;
+      display:flex; align-items:center; justify-content:center;
+      font-weight: 800;
+      flex: 0 0 auto;
+      margin-top: 2px;
+    }
+    .stepTitle { font-weight: 900; font-size: 18px; margin: 0; }
+    .stepSub { margin: 2px 0 0; color: var(--muted); font-size: 13px; line-height: 1.25; }
+
+    /* “checkbox-style” (radio behavior) */
+    .modeRow { display:flex; align-items:center; gap: 12px; flex-wrap: wrap; }
+    .modeLabel { display:flex; align-items:center; gap: 10px; padding: 10px 12px; border: 1px solid var(--card-border); border-radius: 14px; cursor: pointer; background:#fff; }
+    .modeLabel.selected { border-color: rgba(43,124,255,0.45); box-shadow: 0 0 0 3px rgba(43,124,255,0.12); }
+    .fakeBox {
+      width: 18px; height: 18px; border-radius: 6px;
+      border: 2px solid #cfcfcf;
+      display:inline-flex; align-items:center; justify-content:center;
+      font-weight: 900; font-size: 14px; line-height: 1;
+      color: #fff;
+      background: #fff;
+    }
+    .modeLabel.selected .fakeBox { border-color: var(--primary); background: var(--primary); }
+    .modeText { font-weight: 800; }
+    .modeHint { color: var(--muted); font-size: 12px; margin-left: 6px; }
+    .infoBtn {
+      width: 22px; height: 22px; border-radius: 999px;
+      border: 1px solid #d6d6d6;
       background: #fff;
       cursor: pointer;
-      font-size: 14px;
+      display:inline-flex; align-items:center; justify-content:center;
+      font-weight: 900;
+      color: #444;
+      flex: 0 0 auto;
     }
-    button.primary {
-      background: #2b7cff;
-      color: #fff;
-      border-color: #2b7cff;
-      font-weight: 800;
-    }
-    button.secondary {
-      background: #f7f7f7;
-      border-color: #e5e5e5;
-      font-weight: 700;
-    }
-    button:disabled { opacity: 0.6; cursor: not-allowed; }
 
+    /* Buttons */
+    button { padding: 12px 14px; border-radius: 14px; border: 1px solid #d6d6d6; background: #fff; cursor: pointer; font-weight: 700; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .btnWide { width: 100%; padding: 16px 14px; font-size: 16px; border-radius: 16px; }
+    .primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .btnRow { display:flex; flex-direction:column; gap: 10px; }
+    .btnRow button { display:flex; align-items:center; justify-content:space-between; }
+    .btnMeta { color: var(--muted); font-weight: 700; font-size: 12px; }
+
+    /* Preview */
     #preview {
       width: 100%;
       max-height: 520px;
       object-fit: contain;
-      border-radius: 12px;
+      border-radius: 14px;
       border: 1px solid #eee;
       display: none;
-    }
-
-    .status { margin: 8px 0 0; color: #666; font-size: 13px; }
-    .ok { color: #0a7a0a; font-weight: 800; }
-    .err { color: #b00020; font-weight: 800; }
-
-    .pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 6px 10px;
-      border-radius: 999px;
-      border: 1px solid #e5e5e5;
-      background: #fafafa;
-      font-size: 12px;
-      color: #444;
-      font-weight: 700;
-      white-space: nowrap;
-    }
-
-    .stepBox {
-      border: 1px solid #eee;
-      background: #fbfbfb;
-      border-radius: 14px;
-      padding: 12px;
-      margin: 0 0 12px;
-    }
-    .stepTitle {
-      display: flex;
-      gap: 10px;
-      align-items: baseline;
-      margin: 0 0 8px;
-      font-weight: 900;
-      color: #111;
-    }
-    .stepNum {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 26px;
-      height: 26px;
-      border-radius: 10px;
-      background: #111;
-      color: #fff;
-      font-size: 13px;
-    }
-    .stepHelp { color: #555; font-size: 13px; margin: 0 0 10px; }
-
-    .modeRow {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      align-items: center;
-    }
-    .modeOption {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 10px 12px;
-      border: 1px solid #e7e7e7;
-      border-radius: 12px;
       background: #fff;
     }
-    .modeOption input { transform: scale(1.15); }
-    .modeText { display: flex; flex-direction: column; gap: 2px; }
-    .modeText .label { font-weight: 900; color: #111; font-size: 14px; }
-    .modeText .desc { color: #666; font-size: 12px; }
-    .infoBtn {
-      width: 28px;
-      height: 28px;
-      border-radius: 999px;
-      border: 1px solid #e5e5e5;
+
+    .thumbStrip { display:flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .thumbChip {
+      border: 1px solid #eaeaea; border-radius: 12px; padding: 6px;
+      display:flex; flex-direction:column; gap: 6px; width: 92px;
       background: #fff;
-      font-weight: 900;
-      cursor: pointer;
-      line-height: 26px;
-      text-align: center;
-      padding: 0;
     }
+    .thumbChip img { width: 100%; height: 68px; object-fit: cover; border-radius: 10px; border:1px solid #efefef; }
+    .thumbChip .chipLabel { font-size: 11px; color: var(--muted); font-weight: 800; display:flex; justify-content:space-between; }
+    .removeX { border: none; background: transparent; color:#888; cursor:pointer; font-weight: 900; padding: 0; }
 
-    .photoButtons {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 10px;
-    }
-    .photoButtons button {
-      width: 100%;
-      text-align: left;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 12px 14px;
-    }
-    .photoButtons .hint {
-      font-size: 12px;
-      color: #666;
-      font-weight: 600;
-    }
-
+    /* Tips */
     .tips {
-      margin-top: 10px;
-      border-radius: 14px;
-      background: #f6f6f6;
-      border: 1px solid #eee;
-      padding: 12px;
-      color: #333;
-      font-size: 14px;
-      line-height: 1.35;
-    }
-    .tips strong { display: block; margin-bottom: 6px; }
-
-    .resultHeader {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 10px;
-    }
-    .resultTitle {
-      font-size: 20px;
-      font-weight: 900;
-      margin: 0;
-    }
-
-    .resultCards { display: grid; grid-template-columns: 1fr; gap: 12px; }
-    .itemCard {
-      border: 1px solid #eee;
+      background: #f3f3f3;
+      border: 1px solid #ededed;
       border-radius: 16px;
-      padding: 14px;
-      background: #fff;
-    }
-    .itemCard.selected {
-      border-color: #2b7cff;
-      box-shadow: 0 0 0 3px rgba(43,124,255,0.12);
-    }
-    .itemTop {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 10px;
-    }
-    .itemName {
-      font-weight: 900;
-      font-size: 20px;
-      margin: 0;
-      color: #111;
-      line-height: 1.15;
-    }
-    .metrics {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      margin-top: 12px;
-    }
-    .metricBox {
-      border: 1px solid #eee;
-      background: #fafafa;
-      border-radius: 14px;
       padding: 12px;
+      color: #222;
+      line-height: 1.25;
+      margin-top: 10px;
     }
-    .metricLabel { font-size: 12px; color: #666; margin-bottom: 6px; }
-    .metricValue { font-size: 22px; font-weight: 900; color: #111; }
+    .tips b { display:block; margin-bottom: 6px; }
 
-    details { margin-top: 12px; }
+    /* Result */
+    .status { margin: 8px 0 0; color: var(--muted); font-size: 13px; }
+    .ok { color: var(--ok); font-weight: 900; }
+    .err { color: var(--danger); font-weight: 900; }
+    .resultCard { border: 1px dashed #ddd; border-radius: 16px; padding: 12px; background: #fafafa; }
+    .resultHead { display:flex; align-items:center; justify-content:space-between; gap: 10px; }
+    .pill { font-size: 12px; font-weight: 900; color: #2b7cff; background: rgba(43,124,255,0.12); border: 1px solid rgba(43,124,255,0.18); padding: 6px 10px; border-radius: 999px; }
+    .itemTitle { font-size: 22px; font-weight: 950; margin: 0; line-height: 1.05; }
+    .metrics { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+    .metricBox { border: 1px solid #ededed; background:#fff; border-radius: 14px; padding: 10px; }
+    .metricLabel { color: var(--muted); font-size: 12px; font-weight: 900; }
+    .metricValue { font-size: 22px; font-weight: 950; margin-top: 2px; }
+
+    details { margin-top: 10px; }
     pre {
       white-space: pre-wrap;
       word-break: break-word;
-      background: #f7f7f7;
+      background: var(--soft);
       border: 1px solid #eee;
       padding: 10px;
       border-radius: 12px;
-      margin: 10px 0 0;
+      margin: 8px 0 0;
       font-size: 12px;
     }
 
+    /* History */
     .historyList { display: flex; flex-direction: column; gap: 10px; }
     .historyItem {
       display: grid;
@@ -233,219 +151,161 @@
       gap: 10px;
       align-items: center;
       border: 1px solid #eee;
-      border-radius: 12px;
-      padding: 8px;
+      border-radius: 14px;
+      padding: 10px;
       cursor: pointer;
       background: #fff;
-      transition: box-shadow 0.12s ease, border-color 0.12s ease, transform 0.02s ease;
-      user-select: none;
-      -webkit-tap-highlight-color: transparent;
     }
     .historyItem:hover { background: #fafafa; }
-    .historyItem:active { transform: scale(0.995); }
-    .historyItem.selected {
-      border-color: #2b7cff;
-      box-shadow: 0 0 0 3px rgba(43,124,255,0.12);
-    }
-    .thumb { width: 72px; height: 72px; object-fit: cover; border-radius: 10px; border: 1px solid #eee; }
+    .historyItem.selected { border-color: rgba(43,124,255,0.55); box-shadow: 0 0 0 3px rgba(43,124,255,0.14); }
+    .thumb { width: 72px; height: 72px; object-fit: cover; border-radius: 12px; border: 1px solid #eee; background:#fff; }
     .historyMeta { font-size: 13px; color: #444; }
     .historyMeta .title { font-weight: 900; color: #111; margin-bottom: 2px; }
     .historyMeta .time { color: #666; font-size: 12px; }
-    .historyMeta .sharedTag {
-      display: inline-block;
-      margin-top: 6px;
-      padding: 4px 8px;
-      border-radius: 999px;
-      border: 1px solid #dbe7ff;
-      background: #edf4ff;
-      color: #1f5bd6;
-      font-size: 12px;
-      font-weight: 800;
-    }
-
-    .sectionTop {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      margin-bottom: 10px;
-    }
-    .sectionTop h3 { margin: 0; }
-    .sectionBtnRow {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-    }
-
-    .small { font-size: 12px; color: #666; margin-top: 10px; }
-    .hidden { display: none !important; }
+    .sharedPill { display:inline-flex; align-items:center; gap: 6px; margin-top: 6px; }
 
     /* Simple modal */
     .modalBackdrop {
-      position: fixed; inset: 0;
-      background: rgba(0,0,0,0.45);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      padding: 18px;
-      z-index: 9999;
+      position: fixed; inset: 0; background: rgba(0,0,0,0.35);
+      display:none; align-items:center; justify-content:center; padding: 18px;
+      z-index: 1000;
     }
     .modal {
-      width: 100%;
-      max-width: 520px;
+      width: min(520px, 100%);
       background: #fff;
-      border-radius: 16px;
-      border: 1px solid #eee;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+      border-radius: 18px;
+      border: 1px solid #eaeaea;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.18);
       padding: 14px;
     }
-    .modal h4 { margin: 0 0 8px; font-size: 16px; }
-    .modal p { margin: 0 0 12px; color: #444; font-size: 14px; line-height: 1.35; }
-    .modalActions { display: flex; justify-content: flex-end; gap: 10px; }
+    .modalTitle { font-weight: 950; font-size: 18px; margin: 0 0 6px; }
+    .modalBody { color: #222; font-size: 14px; line-height: 1.35; }
+    .modalActions { display:flex; justify-content:flex-end; margin-top: 12px; }
   </style>
 </head>
 
 <body>
   <h1>Estate AI Scanner</h1>
-  <p class="sub" id="subtitle">Identify and price items fast. Start by choosing what you’re pricing and adding photos.</p>
+  <p class="sub">Identify and price items for estate sales. Start by choosing what you’re pricing, then add photos.</p>
 
-  <!-- Hidden inputs: Camera + Gallery + Detail Photo -->
+  <!-- Hidden inputs -->
   <input id="cameraInput" type="file" accept="image/*" capture="environment" style="display:none" />
   <input id="galleryInput" type="file" accept="image/*" style="display:none" />
   <input id="detailInput" type="file" accept="image/*" style="display:none" />
 
   <div class="grid">
-    <div class="card">
-      <h3>Preview</h3>
-      <img id="preview" alt="Preview" />
-      <div id="previewHint" class="status">Choose a pricing mode, then add photos.</div>
-
-      <div class="tips">
-        <strong>Scan tips:</strong>
-        • Add close-up photos of stamps, markings, signatures, or crisp edges.<br/>
-        • If results are unclear or items are missed, take a brighter and closer photo.<br/><br/>
-        <strong>Limits:</strong> Max photos per scan: <b>4</b>. Max items in multi-item mode: <b>8</b>.
-      </div>
-
-      <div class="small">
-        Tip: On phones, “Use Camera” should open the rear camera automatically.
-      </div>
-    </div>
-
+    <!-- Left column: steps + preview -->
     <div class="card">
       <!-- Step 1 -->
-      <div class="stepBox">
-        <div class="stepTitle">
-          <span class="stepNum">1</span>
-          <span>Choose what you want to price</span>
+      <div class="stepHeader">
+        <div class="stepNum">1</div>
+        <div>
+          <div class="stepTitle">Price</div>
+          <div class="stepSub">Choose one option to continue.</div>
         </div>
-        <p class="stepHelp">Price one clear item, or price several items in one photo.</p>
+      </div>
 
-        <div class="modeRow">
-          <label class="modeOption">
-            <input type="checkbox" id="modeSingle" />
-            <span class="modeText">
-              <span class="label">Price: One Item</span>
-              <span class="desc">Best for one object per scan</span>
-            </span>
-            <button class="infoBtn" type="button" onclick="openModeInfo('single')" aria-label="One Item info">i</button>
-          </label>
-
-          <label class="modeOption">
-            <input type="checkbox" id="modeMulti" />
-            <span class="modeText">
-              <span class="label">Price: Many Items</span>
-              <span class="desc">Detect up to 8 items in one photo</span>
-            </span>
-            <button class="infoBtn" type="button" onclick="openModeInfo('multi')" aria-label="Many Items info">i</button>
-          </label>
+      <div class="modeRow" style="margin-bottom:12px;">
+        <div class="modeLabel" id="modeOneWrap" onclick="setMode('single')">
+          <span class="fakeBox" id="modeOneBox">✓</span>
+          <span class="modeText">One Item</span>
+          <button class="infoBtn" onclick="event.stopPropagation(); openInfo('single')" aria-label="Info">i</button>
         </div>
 
-        <div id="modeError" class="status err hidden">Please select One Item or Many Items to continue.</div>
+        <div class="modeLabel" id="modeManyWrap" onclick="setMode('multi')">
+          <span class="fakeBox" id="modeManyBox">✓</span>
+          <span class="modeText">Many Items</span>
+          <button class="infoBtn" onclick="event.stopPropagation(); openInfo('multi')" aria-label="Info">i</button>
+        </div>
       </div>
 
       <!-- Step 2 -->
-      <div class="stepBox">
-        <div class="stepTitle">
-          <span class="stepNum">2</span>
-          <span>Select an option to Add Photos</span>
-        </div>
-        <p class="stepHelp">Add a main photo first. Then (optional) add up to 3 detail photos for markings, labels, or close-ups.</p>
-
-        <div class="photoButtons">
-          <button type="button" class="secondary" onclick="openCamera()">
-            <span>Use Camera</span>
-            <span class="hint">Main photo</span>
-          </button>
-
-          <button type="button" class="secondary" onclick="openGallery()">
-            <span>Choose From Photos</span>
-            <span class="hint">Main photo</span>
-          </button>
-
-          <button type="button" class="secondary" onclick="openDetailPhoto()">
-            <span>Add Detail Photo</span>
-            <span class="hint">Up to 3 extras</span>
-          </button>
+      <div class="stepHeader" style="margin-top: 6px;">
+        <div class="stepNum">2</div>
+        <div>
+          <div class="stepTitle">Select an option to Add Photos</div>
+          <div class="stepSub">Add a main photo first. Then (optional) add up to 3 detail photos for markings, labels, or close-ups.</div>
         </div>
       </div>
 
-      <!-- Step 3 -->
-      <div class="stepBox">
-        <div class="stepTitle">
-          <span class="stepNum">3</span>
-          <span>Identify & price</span>
-        </div>
-        <p class="stepHelp">Select <b>Identify and Price my item(s)</b> to see results.</p>
-
-        <button id="analyzeBtn" class="primary" style="width:100%;" onclick="analyze()" disabled>
-          Identify and Price my item(s)
+      <div class="btnRow">
+        <button onclick="openCamera()">
+          <span>Use Camera</span>
+          <span class="btnMeta">Main photo</span>
+        </button>
+        <button onclick="openGallery()">
+          <span>Choose From Photos</span>
+          <span class="btnMeta">Main photo</span>
+        </button>
+        <button onclick="openDetail()">
+          <span>Add Detail Photo</span>
+          <span class="btnMeta">Up to 3 extras</span>
         </button>
       </div>
 
-      <div class="resultHeader">
-        <div>
-          <div id="status" class="status"></div>
-        </div>
-      </div>
+      <img id="preview" alt="Preview" />
+      <div id="previewHint" class="status">Select a main photo to begin.</div>
 
-      <div id="result"></div>
+      <div class="thumbStrip" id="detailStrip" style="display:none;"></div>
+
+      <div class="tips">
+        <b>Scan tips:</b>
+        • Add close-up photos of stamps, markings, signatures, or crisp edges.<br/>
+        • If results are unclear or items are missed, take a brighter and closer photo.<br/><br/>
+        <b>Limits:</b> Max photos per scan: <b>4</b>. Max items in multi-item mode: <b>8</b>.
+      </div>
     </div>
 
-    <!-- Team History -->
-    <div class="card" style="grid-column: 1 / -1;">
-      <div class="sectionTop">
-        <h3>Team History (shared)</h3>
-        <div class="sectionBtnRow">
-          <button type="button" onclick="refreshTeamHistory()">Refresh Team History</button>
+    <!-- Right column: Identify + results -->
+    <div class="card">
+      <!-- Step 3 -->
+      <div class="stepHeader">
+        <div class="stepNum">3</div>
+        <div>
+          <div class="stepTitle">Identify &amp; price</div>
+          <div class="stepSub">Select <b>Identify and Price my item(s)</b> to see results.</div>
         </div>
       </div>
 
-      <div id="teamHistory" class="historyList"></div>
+      <button id="analyzeBtn" class="primary btnWide" onclick="analyze()">Identify and Price my item(s)</button>
+
+      <div id="status" class="status" style="margin-top:12px;"></div>
+      <div id="result" style="margin-top:10px;"></div>
+
+      <details id="rawWrap" style="display:none;">
+        <summary><b>Show raw JSON</b></summary>
+        <pre id="rawJson"></pre>
+      </details>
+    </div>
+
+    <!-- Team history -->
+    <div class="card" style="grid-column: 1 / -1;">
+      <div class="cardTitleRow">
+        <h3 style="margin:0;">Team History (shared)</h3>
+        <button onclick="refreshTeamHistory()">Refresh Team History</button>
+      </div>
+      <div id="teamHistory" class="historyList" style="margin-top:10px;"></div>
       <div id="teamEmpty" class="status">No team scans yet.</div>
     </div>
 
-    <!-- Local History -->
+    <!-- Local history -->
     <div class="card" style="grid-column: 1 / -1;">
-      <div class="sectionTop">
-        <h3>Local History (this device)</h3>
-        <div class="sectionBtnRow">
-          <button type="button" onclick="clearLocalHistory()">Clear Local History</button>
-        </div>
+      <div class="cardTitleRow">
+        <h3 style="margin:0;">Local History (this device)</h3>
+        <button onclick="clearLocalHistory()">Clear Local History</button>
       </div>
-
-      <div id="history" class="historyList"></div>
+      <div id="history" class="historyList" style="margin-top:10px;"></div>
       <div id="historyEmpty" class="status">No local scans saved yet.</div>
     </div>
   </div>
 
-  <!-- Mode Info Modal -->
-  <div id="modalBackdrop" class="modalBackdrop" onclick="closeModalIfBackdrop(event)">
-    <div class="modal">
-      <h4 id="modalTitle">Info</h4>
-      <p id="modalBody"></p>
+  <!-- Info modal -->
+  <div class="modalBackdrop" id="modalBackdrop" onclick="closeInfo()">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modalTitle" id="modalTitle">Info</div>
+      <div class="modalBody" id="modalBody"></div>
       <div class="modalActions">
-        <button type="button" class="primary" onclick="closeModal()">Got it</button>
+        <button onclick="closeInfo()">Close</button>
       </div>
     </div>
   </div>
@@ -457,10 +317,15 @@
     const cameraInput = document.getElementById("cameraInput");
     const galleryInput = document.getElementById("galleryInput");
     const detailInput = document.getElementById("detailInput");
+
     const preview = document.getElementById("preview");
     const previewHint = document.getElementById("previewHint");
+
     const statusEl = document.getElementById("status");
     const resultEl = document.getElementById("result");
+    const rawWrap = document.getElementById("rawWrap");
+    const rawJson = document.getElementById("rawJson");
+
     const analyzeBtn = document.getElementById("analyzeBtn");
 
     const historyEl = document.getElementById("history");
@@ -469,11 +334,11 @@
     const teamHistoryEl = document.getElementById("teamHistory");
     const teamEmptyEl = document.getElementById("teamEmpty");
 
-    const modeSingleEl = document.getElementById("modeSingle");
-    const modeMultiEl = document.getElementById("modeMulti");
-    const modeErrorEl = document.getElementById("modeError");
+    const modeOneWrap = document.getElementById("modeOneWrap");
+    const modeManyWrap = document.getElementById("modeManyWrap");
 
-    // Modal
+    const detailStrip = document.getElementById("detailStrip");
+
     const modalBackdrop = document.getElementById("modalBackdrop");
     const modalTitle = document.getElementById("modalTitle");
     const modalBody = document.getElementById("modalBody");
@@ -481,26 +346,21 @@
     // =========================
     // Local state
     // =========================
-    let selectedFile = null;        // main photo file
-    let selectedDataUrl = null;     // main photo dataURL (used only for preview; NOT stored in localHistory)
-    let lastObjectUrl = null;
+    let analysisMode = null; // 'single' | 'multi' (forced)
+    let mainFile = null;
+    let mainDataUrl = null;
+    let mainObjectUrl = null;
 
-    // Detail photos (up to 3)
-    const detailFiles = [];         // File[]
-    const detailObjectUrls = [];    // string[]
+    let detailFiles = [];     // up to 3
+    let detailDataUrls = [];  // base64 versions for local history
 
-    // Selection highlights
-    let selectedTeamScanId = null;
-    let selectedLocalIndex = null;
+    let selectedHistoryKey = null; // for visual highlight
 
-    // Local history (keep tiny to avoid quota)
-    const LOCAL_HISTORY_KEY = "estate_ai_local_history_v1";
-    const LOCAL_HISTORY_LIMIT = 25;
-
-    // Limits
-    const MAX_PHOTOS_PER_SCAN = 4; // 1 main + up to 3 details
     const MAX_DETAIL_PHOTOS = 3;
-    const MAX_MULTI_ITEMS = 8;
+    const MAX_ITEMS_MULTI = 8;
+
+    const LOCAL_HISTORY_KEY = "estate_ai_local_history_v2_textonly";
+    const LOCAL_HISTORY_LIMIT = 25;
 
     // =========================
     // Helpers
@@ -514,6 +374,12 @@
         .replaceAll("'", "&#039;");
     }
 
+    function safeString(x) {
+      if (x == null) return "";
+      if (typeof x === "string") return x;
+      try { return JSON.stringify(x); } catch { return String(x); }
+    }
+
     function nowIso() {
       return new Date().toISOString();
     }
@@ -523,66 +389,93 @@
       catch { return iso; }
     }
 
-    function stripCodeFences(s) {
-      return String(s ?? "").replace(/```json|```/gi, "").trim();
+    function money(n) {
+      if (n == null || n === "") return "—";
+      const num = Number(n);
+      if (Number.isFinite(num)) return `$${num}`;
+      return safeString(n);
+    }
+
+    function moneyRange(objOrNum) {
+      // Accepts:
+      // - number: 15
+      // - string: "15-20"
+      // - object: {low, high} or {min, max}
+      if (objOrNum == null || objOrNum === "") return "—";
+
+      if (typeof objOrNum === "number") return money(objOrNum);
+      if (typeof objOrNum === "string") {
+        // normalize "$15-$20" etc if already human
+        return objOrNum.includes("$") ? objOrNum : objOrNum.replace(/\s+/g, " ").trim();
+      }
+      if (typeof objOrNum === "object") {
+        const low = objOrNum.low ?? objOrNum.min;
+        const high = objOrNum.high ?? objOrNum.max;
+        if (low != null && high != null) return `${money(low)} – ${money(high)}`;
+        if (low != null) return money(low);
+        if (high != null) return money(high);
+      }
+      return safeString(objOrNum);
     }
 
     async function readJsonOrText(resp) {
       const ct = resp.headers.get("content-type") || "";
       if (ct.includes("application/json")) return await resp.json();
       const text = await resp.text();
-      try { return JSON.parse(stripCodeFences(text)); } catch { return { detail: text }; }
+      try { return JSON.parse(text); } catch { return { detail: text }; }
     }
 
-    function setModeError(show) {
-      modeErrorEl.classList.toggle("hidden", !show);
+    function setStatusOk(text) {
+      statusEl.innerHTML = `<span class="ok">${escapeHtml(text)}</span>`;
+    }
+    function setStatusErr(text) {
+      statusEl.innerHTML = `<span class="err">Error:</span> ${escapeHtml(safeString(text))}`;
     }
 
-    function getSelectedMode() {
-      if (modeSingleEl.checked) return "single";
-      if (modeMultiEl.checked) return "multi";
-      return null;
+    // =========================
+    // Mode selection (forced)
+    // =========================
+    function setMode(mode) {
+      analysisMode = mode;
+
+      modeOneWrap.classList.toggle("selected", mode === "single");
+      modeManyWrap.classList.toggle("selected", mode === "multi");
+
+      // enable analyze button only after mode + main photo is ready
+      updateAnalyzeEnabled();
     }
 
     function ensureModeChosen() {
-      const mode = getSelectedMode();
-      setModeError(!mode);
-      return !!mode;
+      if (!analysisMode) {
+        setStatusErr("Please choose One Item or Many Items first.");
+        return false;
+      }
+      return true;
     }
 
-    function updateAnalyzeEnabled() {
-      // Must pick mode and have a main photo and have main photo loaded
-      const modeOk = !!getSelectedMode();
-      const photoOk = !!selectedFile && !!selectedDataUrl;
-      analyzeBtn.disabled = !(modeOk && photoOk);
-    }
-
-    // =========================
-    // Modal info
-    // =========================
-    function openModeInfo(which) {
-      if (which === "single") {
-        modalTitle.textContent = "One Item (recommended)";
-        modalBody.textContent =
-          "Use One Item when you have a clear photo of a single object. This usually gives the most accurate identification and pricing. Add detail photos for markings, labels, stamps, signatures, or close-ups.";
+    function openInfo(mode) {
+      if (mode === "single") {
+        modalTitle.textContent = "One Item";
+        modalBody.innerHTML = `
+          Use <b>One Item</b> when your main photo shows one primary object (like a vase, a single book, a watch).<br/><br/>
+          You can still add detail photos for markings, stamps, signatures, labels, and close-ups.
+        `;
       } else {
-        modalTitle.textContent = "Many Items (multi-item mode)";
-        modalBody.textContent =
-          `Use Many Items when you want the app to detect several objects in one photo (up to ${MAX_MULTI_ITEMS}). For best results, keep items spread out and well-lit. If something is missed, take a closer/brighter photo or switch to One Item for that object.`;
+        modalTitle.textContent = "Many Items";
+        modalBody.innerHTML = `
+          Use <b>Many Items</b> when your photo shows multiple objects and you want separate identification + a bundle estimate.<br/><br/>
+          Tip: For best results, keep it under <b>${MAX_ITEMS_MULTI}</b> distinct items and make sure objects are clearly visible.
+        `;
       }
       modalBackdrop.style.display = "flex";
     }
 
-    function closeModal() {
+    function closeInfo() {
       modalBackdrop.style.display = "none";
     }
 
-    function closeModalIfBackdrop(e) {
-      if (e.target === modalBackdrop) closeModal();
-    }
-
     // =========================
-    // Local history (device) - TEXT ONLY to avoid quota issues
+    // Local history (text-only to avoid storage quota)
     // =========================
     function readLocalHistory() {
       try {
@@ -606,240 +499,229 @@
 
     function clearLocalHistory() {
       localStorage.removeItem(LOCAL_HISTORY_KEY);
-      selectedLocalIndex = null;
       renderLocalHistory();
       statusEl.textContent = "";
       resultEl.innerHTML = "";
+      rawWrap.style.display = "none";
+      rawJson.textContent = "";
     }
 
     // =========================
-    // Result rendering (new JSON format)
-    // Expected shape from backend:
-    // { scan_id, created_at, analysis_mode, result: { items: [...], bundle_price_range: {min,max} or {low,high}, advice: [] } }
+    // Photos
     // =========================
-    function moneyVal(v) {
-      if (v === null || v === undefined || v === "") return "—";
-      if (typeof v === "number") return "$" + v;
-      if (typeof v === "string") {
-        // If already has $, return as-is
-        return v.trim().startsWith("$") ? v.trim() : v.trim();
-      }
-      if (typeof v === "object") {
-        // e.g. {low,high} or {min,max}
-        const low = v.low ?? v.min;
-        const high = v.high ?? v.max;
-        if (typeof low === "number" && typeof high === "number") {
-          if (low === high) return "$" + low;
-          return "$" + low + " – $" + high;
-        }
-      }
-      return "—";
+    function openCamera() {
+      cameraInput.value = "";
+      cameraInput.click();
     }
 
-    function firstNonEmpty(...vals) {
-      for (const v of vals) {
-        if (v === null || v === undefined) continue;
-        if (typeof v === "string" && v.trim() === "") continue;
-        return v;
-      }
-      return null;
+    function openGallery() {
+      galleryInput.value = "";
+      galleryInput.click();
     }
 
-    function normalizeScanPayload(data) {
-      // If backend sometimes returns {items:[...]} directly, wrap it.
-      if (data && typeof data === "object" && Array.isArray(data.items) && !data.result) {
-        return {
-          scan_id: data.scan_id ?? null,
-          created_at: data.created_at ?? null,
-          analysis_mode: data.analysis_mode ?? data.mode ?? null,
-          result: {
-            items: data.items,
-            bundle_price_range: data.bundle_price_range ?? data.bundle_price ?? null,
-            advice: data.advice ?? data.suggestions ?? data.notes ?? null
-          }
-        };
-      }
-      return data;
-    }
-
-    function renderResult(data) {
-      const payload = normalizeScanPayload(data);
-
-      // Clear selection highlight on new render
-      document.querySelectorAll(".itemCard.selected").forEach(el => el.classList.remove("selected"));
-
-      if (!payload || typeof payload !== "object") {
-        resultEl.innerHTML = `<pre>${escapeHtml(String(payload))}</pre>`;
+    function openDetail() {
+      if (!mainFile) {
+        setStatusErr("Add a main photo first.");
         return;
       }
-
-      if (payload.error) {
-        statusEl.innerHTML = `<span class="err">Error:</span> ${escapeHtml(payload.error)}`;
-        if (payload.details) {
-          resultEl.innerHTML = `<pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre>`;
-        } else if (payload.raw) {
-          resultEl.innerHTML = `<pre>${escapeHtml(payload.raw)}</pre>`;
-        }
+      if (detailFiles.length >= MAX_DETAIL_PHOTOS) {
+        setStatusErr(`Max detail photos reached (${MAX_DETAIL_PHOTOS}).`);
         return;
       }
+      detailInput.value = "";
+      detailInput.click();
+    }
 
-      const result = payload.result || {};
-      const items = Array.isArray(result.items) ? result.items : [];
-      const bundle = result.bundle_price_range || result.bundle_price || result.bundle || null;
+    function updateAnalyzeEnabled() {
+      analyzeBtn.disabled = !(analysisMode && mainFile && mainDataUrl);
+    }
+
+    function setMainFile(file) {
+      if (!file) return;
+
+      mainFile = file;
+      mainDataUrl = null;
+
+      // clear results
+      statusEl.textContent = "";
+      resultEl.innerHTML = "";
+      rawWrap.style.display = "none";
+      rawJson.textContent = "";
+
+      // preview
+      if (mainObjectUrl) URL.revokeObjectURL(mainObjectUrl);
+      mainObjectUrl = URL.createObjectURL(file);
+
+      preview.src = mainObjectUrl;
+      preview.style.display = "block";
+      previewHint.textContent = "Loading image…";
+
+      analyzeBtn.disabled = true;
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        mainDataUrl = reader.result;
+        previewHint.textContent = "Ready to analyze.";
+        updateAnalyzeEnabled();
+      };
+      reader.onerror = () => {
+        previewHint.textContent = "Could not read image.";
+        updateAnalyzeEnabled();
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function addDetailFile(file) {
+      if (!file) return;
+      if (detailFiles.length >= MAX_DETAIL_PHOTOS) return;
+
+      detailFiles.push(file);
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        detailDataUrls.push(reader.result);
+        renderDetailStrip();
+      };
+      reader.onerror = () => renderDetailStrip();
+      reader.readAsDataURL(file);
+
+      renderDetailStrip();
+    }
+
+    function removeDetailAt(i) {
+      detailFiles.splice(i, 1);
+      detailDataUrls.splice(i, 1);
+      renderDetailStrip();
+    }
+
+    function renderDetailStrip() {
+      if (!detailFiles.length) {
+        detailStrip.style.display = "none";
+        detailStrip.innerHTML = "";
+        return;
+      }
+      detailStrip.style.display = "flex";
+      detailStrip.innerHTML = "";
+
+      detailFiles.forEach((f, idx) => {
+        const url = URL.createObjectURL(f);
+        const chip = document.createElement("div");
+        chip.className = "thumbChip";
+        chip.innerHTML = `
+          <div class="chipLabel">
+            <span>Detail ${idx + 1}</span>
+            <button class="removeX" title="Remove" onclick="removeDetailAt(${idx})">×</button>
+          </div>
+          <img src="${escapeHtml(url)}" alt="detail" />
+        `;
+        detailStrip.appendChild(chip);
+      });
+    }
+
+    cameraInput.addEventListener("change", () => setMainFile(cameraInput.files?.[0]));
+    galleryInput.addEventListener("change", () => setMainFile(galleryInput.files?.[0]));
+    detailInput.addEventListener("change", () => addDetailFile(detailInput.files?.[0]));
+
+    // =========================
+    // Rendering results (new JSON format)
+    // Expected:
+    // data = { scan_id, created_at, analysis_mode, result: { items: [...], bundle_price_range?, advice? } }
+    // items[i] may have estimated_price = number OR {low,high}
+    // =========================
+    function renderResultEnvelope(envelope) {
+      // show raw json always (helps debugging + trust)
+      rawWrap.style.display = "block";
+      rawJson.textContent = JSON.stringify(envelope, null, 2);
+
+      const r = envelope?.result || envelope; // allow direct result fallback
+      const items = Array.isArray(r?.items) ? r.items : [];
 
       if (!items.length) {
-        // show friendly empty state + raw json toggle
-        const pricingHint = firstNonEmpty(result.pricing_estimates, result.pricing_estimate, result.suggestions, null);
+        const msg = r?.pricing_estimates || "No items detected. Try a closer/brighter photo or check raw JSON.";
         resultEl.innerHTML = `
-          <div class="itemCard">
-            <div class="itemTop">
-              <div>
-                <div class="itemName">Result</div>
-                <div class="status" style="margin-top:6px;">
-                  No items detected. Try a closer/brighter photo or check raw JSON.
-                </div>
-                ${pricingHint ? `<div class="status" style="margin-top:6px;">${escapeHtml(String(pricingHint))}</div>` : ""}
-              </div>
+          <div class="resultCard">
+            <div class="resultHead">
+              <div class="itemTitle">Result</div>
             </div>
-            <details>
-              <summary><b>Show raw JSON</b></summary>
-              <pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre>
-            </details>
+            <div style="margin-top:8px; color:#222;">${escapeHtml(msg)}</div>
           </div>
         `;
         return;
       }
 
-      const cardsHtml = items.map((it, idx) => {
-        const name = firstNonEmpty(it.name, it.title, it.item_name, `Item ${idx + 1}`);
-        const desc = firstNonEmpty(it.description, it.details, it.condition, it.condition_notes, it.brand_or_origin, it.type, "");
-        const est = it.estimated_price ?? it.estimated_value ?? it.suggested_listing_price ?? it.estimated_value_range ?? it.price ?? it.pricing_estimate ?? null;
+      // bundle price range
+      const bundle = r?.bundle_price_range;
+      const bundleText = moneyRange(bundle);
 
-        // if estimated_price is object {low,high}
-        const suggested = it.suggested_listing_price ?? it.list_price ?? it.estimated_price ?? est ?? null;
+      // advice array or advisory tips
+      const advice = Array.isArray(r?.advice) ? r.advice
+                   : Array.isArray(r?.advisory?.tips) ? r.advisory.tips
+                   : [];
+
+      const adviceHtml = advice.length
+        ? `<div style="margin-top:10px; color:#222;"><b>Notes:</b><ul>${advice.map(a => `<li>${escapeHtml(a)}</li>`).join("")}</ul></div>`
+        : "";
+
+      // render item cards
+      resultEl.innerHTML = items.map((it) => {
+        const name = it?.name || it?.title || "Item";
+        const est = it?.estimated_price;
+        const estText = moneyRange(est);
+
+        // some responses may include suggested_list_price, suggested_listing_price, etc.
+        const suggested =
+          it?.suggested_listing_price ??
+          it?.suggested_list_price ??
+          it?.list_price ??
+          null;
+
+        const suggestedText = (suggested && typeof suggested === "object")
+          ? moneyRange(suggested)
+          : money(suggested);
+
+        const detailsText = it?.details || it?.description || "";
+        const conditionText = it?.condition || it?.condition_notes || "";
 
         return `
-          <div class="itemCard" data-item-index="${idx}">
-            <div class="itemTop">
-              <div style="min-width:0;">
-                <div class="itemName">${escapeHtml(String(name))}</div>
-                ${desc ? `<div class="status" style="margin-top:6px;">${escapeHtml(String(desc))}</div>` : ""}
-              </div>
+          <div class="resultCard" style="margin-bottom:12px;">
+            <div class="resultHead">
+              <div class="itemTitle">${escapeHtml(name)}</div>
               <span class="pill">Shared with your team</span>
             </div>
 
             <div class="metrics">
               <div class="metricBox">
                 <div class="metricLabel">Suggested listing price</div>
-                <div class="metricValue">${escapeHtml(moneyVal(suggested))}</div>
+                <div class="metricValue">${escapeHtml(suggestedText)}</div>
               </div>
               <div class="metricBox">
                 <div class="metricLabel">Bundle / range</div>
-                <div class="metricValue">${escapeHtml(moneyVal(bundle))}</div>
+                <div class="metricValue">${escapeHtml(bundleText)}</div>
               </div>
             </div>
+
+            ${(conditionText || detailsText) ? `
+              <div style="margin-top:10px; color:#222; font-size:13px; line-height:1.3;">
+                ${conditionText ? `<b>Condition:</b> ${escapeHtml(conditionText)}<br/>` : ""}
+                ${detailsText ? `<b>Details:</b> ${escapeHtml(detailsText)}` : ""}
+              </div>
+            ` : ""}
+
+            ${adviceHtml}
           </div>
         `;
       }).join("");
-
-      const adviceArr = Array.isArray(result.advice) ? result.advice
-        : Array.isArray(result.tips) ? result.tips
-        : Array.isArray(result.advisory?.tips) ? result.advisory.tips
-        : null;
-
-      const adviceHtml = adviceArr && adviceArr.length
-        ? `<div class="status" style="margin-top:12px;"><b>Notes:</b> ${escapeHtml(adviceArr.join(" "))}</div>`
-        : "";
-
-      resultEl.innerHTML = `
-        <div class="resultCards">
-          ${cardsHtml}
-          ${adviceHtml}
-          <details>
-            <summary><b>Show raw JSON</b></summary>
-            <pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre>
-          </details>
-        </div>
-      `;
-    }
-
-    // =========================
-    // Local history UI
-    // =========================
-    function renderLocalHistory() {
-      const items = readLocalHistory();
-      historyEl.innerHTML = "";
-
-      if (!items.length) {
-        historyEmptyEl.style.display = "block";
-        return;
-      }
-      historyEmptyEl.style.display = "none";
-
-      items.forEach((item, idx) => {
-        const scan = normalizeScanPayload(item?.scan_payload || item);
-        const result = scan?.result || {};
-        const firstItem = Array.isArray(result.items) ? result.items[0] : null;
-
-        const title = firstNonEmpty(firstItem?.name, firstItem?.title, "Saved scan");
-        const time = scan?.created_at ? formatTime(scan.created_at) : "";
-        const bundle = result.bundle_price_range || null;
-        const bundleText = moneyVal(bundle);
-
-        const div = document.createElement("div");
-        div.className = "historyItem";
-        if (selectedLocalIndex === idx) div.classList.add("selected");
-
-        div.onclick = () => openLocalHistoryItem(idx);
-
-        // Local history is text-only; show placeholder thumb
-        div.innerHTML = `
-          <img class="thumb" src="data:image/svg+xml;utf8,${encodeURIComponent(`
-            <svg xmlns='http://www.w3.org/2000/svg' width='72' height='72'>
-              <rect width='72' height='72' rx='10' ry='10' fill='#f2f2f2'/>
-              <text x='50%' y='52%' dominant-baseline='middle' text-anchor='middle' font-family='Arial' font-size='10' fill='#777'>
-                Saved
-              </text>
-            </svg>
-          `)}" alt="thumb" />
-          <div class="historyMeta">
-            <div class="title">${escapeHtml(String(title))}</div>
-            <div>${escapeHtml(bundleText)}</div>
-            <div class="time">${escapeHtml(time)}</div>
-          </div>
-        `;
-        historyEl.appendChild(div);
-      });
-    }
-
-    function openLocalHistoryItem(index) {
-      const items = readLocalHistory();
-      const item = items[index];
-      if (!item) return;
-
-      selectedLocalIndex = index;
-      selectedTeamScanId = null;
-      renderLocalHistory();
-      // Clear team selection highlight
-      document.querySelectorAll("#teamHistory .historyItem").forEach(el => el.classList.remove("selected"));
-
-      selectedFile = null;
-      selectedDataUrl = null;
-      detailFiles.length = 0;
-      detailObjectUrls.forEach(u => URL.revokeObjectURL(u));
-      detailObjectUrls.length = 0;
-
-      preview.style.display = "none";
-      previewHint.textContent = "Loaded from local history.";
-
-      statusEl.innerHTML = `<span class="ok">Loaded ✅</span>`;
-      renderResult(item?.scan_payload || item);
     }
 
     // =========================
     // Team History (shared)
-    // Backend expected: GET /history?limit=25 -> { items: [ {scan_id, created_at, image_url, result, analysis_mode} ] }
+    // Backend returns: { items: [ {scan_id, created_at, image_url, result, analysis_mode} ] }
+    // Each item.result is the result object (contains items[] etc)
     // =========================
+    function clearHistorySelection() {
+      document.querySelectorAll(".historyItem.selected").forEach(el => el.classList.remove("selected"));
+    }
+
     function renderTeamHistory(items) {
       teamHistoryEl.innerHTML = "";
       if (!items || !items.length) {
@@ -849,60 +731,45 @@
       teamEmptyEl.style.display = "none";
 
       items.forEach((item) => {
-        const scanId = item.scan_id ?? item.id ?? null;
-        const result = item.result || {};
-        const firstItem = Array.isArray(result.items) ? result.items[0] : null;
-
-        const title = firstNonEmpty(firstItem?.name, firstItem?.title, "Unknown item");
+        const r = item?.result || {};
+        const first = Array.isArray(r?.items) && r.items.length ? r.items[0] : null;
+        const title = first?.name || first?.title || item?.title || "Scan";
         const time = item?.created_at ? formatTime(item.created_at) : "";
-        const bundle = result.bundle_price_range || null;
-        const bundleText = moneyVal(bundle);
-
-        const imgSrc = item.image_url || "";
+        const imgSrc = item?.image_url || "";
 
         const div = document.createElement("div");
         div.className = "historyItem";
-        if (scanId !== null && scanId === selectedTeamScanId) div.classList.add("selected");
 
-        // Tap-proof: no double triggers
-        div.addEventListener("click", (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-
-          selectedTeamScanId = scanId;
-          selectedLocalIndex = null;
-
-          // Update highlights
-          document.querySelectorAll("#teamHistory .historyItem").forEach(el => el.classList.remove("selected"));
+        div.onclick = () => {
+          clearHistorySelection();
           div.classList.add("selected");
-          renderLocalHistory();
 
-          // Load preview image
+          // load preview from server image
           if (imgSrc) {
             preview.src = imgSrc;
             preview.style.display = "block";
             previewHint.textContent = "Loaded from team history.";
-          } else {
-            preview.style.display = "none";
-            previewHint.textContent = "Loaded from team history (no image).";
           }
 
-          statusEl.innerHTML = `<span class="ok">Loaded ✅</span>`;
-          renderResult({
-            scan_id: scanId,
+          setStatusOk("Loaded ✅");
+
+          // display the envelope-like structure so raw JSON shows scan_id etc
+          renderResultEnvelope({
+            scan_id: item.scan_id,
             created_at: item.created_at,
             analysis_mode: item.analysis_mode,
-            result: result
+            result: item.result
           });
-        }, { passive: false });
+        };
 
         div.innerHTML = `
           <img class="thumb" src="${escapeHtml(imgSrc)}" alt="thumb" />
           <div class="historyMeta">
-            <div class="title">${escapeHtml(String(title))}</div>
-            <div>${escapeHtml(bundleText)}</div>
+            <div class="title">${escapeHtml(title)}</div>
             <div class="time">${escapeHtml(time)}</div>
-            <div class="sharedTag">Shared with your team</div>
+            <div class="sharedPill">
+              <span class="pill">Shared with your team</span>
+            </div>
           </div>
         `;
         teamHistoryEl.appendChild(div);
@@ -921,148 +788,81 @@
     }
 
     // =========================
-    // File selection
+    // Local History (text only)
     // =========================
-    function openCamera() {
-      if (!ensureModeChosen()) return;
-      cameraInput.value = "";
-      cameraInput.click();
-    }
+    function renderLocalHistory() {
+      const items = readLocalHistory();
+      historyEl.innerHTML = "";
 
-    function openGallery() {
-      if (!ensureModeChosen()) return;
-      galleryInput.value = "";
-      galleryInput.click();
-    }
-
-    function openDetailPhoto() {
-      if (!ensureModeChosen()) return;
-      if (!selectedFile) {
-        statusEl.innerHTML = `<span class="err">Add a main photo first.</span>`;
+      if (!items.length) {
+        historyEmptyEl.style.display = "block";
         return;
       }
-      if (detailFiles.length >= MAX_DETAIL_PHOTOS) {
-        statusEl.innerHTML = `<span class="err">Max detail photos reached (${MAX_DETAIL_PHOTOS}).</span>`;
-        return;
-      }
-      detailInput.value = "";
-      detailInput.click();
+      historyEmptyEl.style.display = "none";
+
+      items.forEach((item, idx) => {
+        const first = Array.isArray(item?.result?.result?.items) && item.result.result.items.length
+          ? item.result.result.items[0]
+          : null;
+
+        const title = first?.name || first?.title || "Scan";
+        const time = item?.created_at ? formatTime(item.created_at) : "";
+
+        const div = document.createElement("div");
+        div.className = "historyItem";
+        div.onclick = () => {
+          clearHistorySelection();
+          div.classList.add("selected");
+
+          // local history does NOT store images (avoids quota issues)
+          previewHint.textContent = "Loaded from local history (no local thumbnail saved).";
+
+          setStatusOk("Loaded ✅");
+          renderResultEnvelope(item.result);
+        };
+
+        div.innerHTML = `
+          <img class="thumb" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96'%3E%3Crect width='100%25' height='100%25' fill='%23f1f1f1'/%3E%3Ctext x='50%25' y='52%25' font-size='12' text-anchor='middle' fill='%23999'%3ENo image%3C/text%3E%3C/svg%3E" alt="thumb" />
+          <div class="historyMeta">
+            <div class="title">${escapeHtml(title)}</div>
+            <div class="time">${escapeHtml(time)}</div>
+          </div>
+        `;
+        historyEl.appendChild(div);
+      });
     }
-
-    function resetResultUIForNewPhoto() {
-      statusEl.textContent = "";
-      resultEl.innerHTML = "";
-      selectedTeamScanId = null;
-      selectedLocalIndex = null;
-      document.querySelectorAll(".historyItem.selected").forEach(el => el.classList.remove("selected"));
-    }
-
-    function handleMainFileSelect(file) {
-      if (!file) return;
-
-      selectedFile = file;
-      selectedDataUrl = null;
-
-      // Clear details on new main photo
-      detailFiles.length = 0;
-      detailObjectUrls.forEach(u => URL.revokeObjectURL(u));
-      detailObjectUrls.length = 0;
-
-      resetResultUIForNewPhoto();
-
-      // Prevent Analyze until base64 is ready
-      analyzeBtn.disabled = true;
-      previewHint.textContent = "Loading image…";
-
-      if (lastObjectUrl) URL.revokeObjectURL(lastObjectUrl);
-      lastObjectUrl = URL.createObjectURL(file);
-
-      preview.src = lastObjectUrl;
-      preview.style.display = "block";
-
-      const reader = new FileReader();
-      reader.onload = () => {
-        selectedDataUrl = reader.result;
-        previewHint.textContent = "Ready to analyze.";
-        updateAnalyzeEnabled();
-      };
-      reader.onerror = () => {
-        previewHint.textContent = "Could not read image.";
-        updateAnalyzeEnabled();
-      };
-      reader.readAsDataURL(file);
-    }
-
-    function handleDetailFileSelect(file) {
-      if (!file) return;
-      if (detailFiles.length >= MAX_DETAIL_PHOTOS) return;
-
-      detailFiles.push(file);
-
-      // For now we don't render a detail gallery in UI (keeps it clean)
-      // but we can show a small status hint:
-      statusEl.innerHTML = `<span class="ok">Added detail photo ✅</span> (${detailFiles.length}/${MAX_DETAIL_PHOTOS})`;
-
-      updateAnalyzeEnabled();
-    }
-
-    cameraInput.addEventListener("change", () => handleMainFileSelect(cameraInput.files?.[0]));
-    galleryInput.addEventListener("change", () => handleMainFileSelect(galleryInput.files?.[0]));
-    detailInput.addEventListener("change", () => handleDetailFileSelect(detailInput.files?.[0]));
-
-    // =========================
-    // Mode selection behavior (force pick one)
-    // =========================
-    modeSingleEl.addEventListener("change", () => {
-      if (modeSingleEl.checked) modeMultiEl.checked = false;
-      setModeError(false);
-      updateAnalyzeEnabled();
-    });
-
-    modeMultiEl.addEventListener("change", () => {
-      if (modeMultiEl.checked) modeSingleEl.checked = false;
-      setModeError(false);
-      updateAnalyzeEnabled();
-    });
 
     // =========================
     // Analyze
-    // POST /analyze-image
-    // form-data:
-    //   file: main image
-    //   detail_files: optional (multiple)
-    //   analysis_mode: "single" | "multi"
+    // Sends: main photo + optional detail photos + analysis_mode
+    // Backend expected to accept:
+    // - file (main)
+    // - detail_files (0..3)
+    // - analysis_mode ('single'|'multi')
     // =========================
     async function analyze() {
       if (!ensureModeChosen()) return;
 
-      if (!selectedFile) {
-        statusEl.innerHTML = `<span class="err">Add a main photo first.</span>`;
+      if (!mainFile) {
+        setStatusErr("Select a main photo first.");
         return;
       }
-      if (!selectedDataUrl) {
-        statusEl.innerHTML = `<span class="err">Please wait—image still loading.</span>`;
+      if (!mainDataUrl) {
+        setStatusErr("Please wait—image still loading.");
         return;
       }
-
-      // Enforce photo limit
-      const totalPhotos = 1 + detailFiles.length;
-      if (totalPhotos > MAX_PHOTOS_PER_SCAN) {
-        statusEl.innerHTML = `<span class="err">Too many photos. Max per scan is ${MAX_PHOTOS_PER_SCAN}.</span>`;
-        return;
-      }
-
-      const analysisMode = getSelectedMode();
 
       analyzeBtn.disabled = true;
       statusEl.textContent = "Analyzing…";
       resultEl.innerHTML = "";
+      rawWrap.style.display = "none";
+      rawJson.textContent = "";
 
       const formData = new FormData();
-      formData.append("file", selectedFile);
+      formData.append("file", mainFile);
       formData.append("analysis_mode", analysisMode);
 
-      // Add detail photos (backend should accept these as optional)
+      // detail photos
       detailFiles.forEach((f) => formData.append("detail_files", f));
 
       try {
@@ -1070,27 +870,32 @@
         const data = await readJsonOrText(resp);
 
         if (!resp.ok) {
-          const msg = data?.detail || `Server error ${resp.status}`;
-          throw new Error(msg);
+          // prefer {error, details} or {detail}
+          const msg = data?.error || data?.detail || data?.message || `Server error ${resp.status}`;
+          const details = data?.details ? `\n\nDetails: ${safeString(data.details)}` : "";
+          throw new Error(safeString(msg) + details);
         }
 
-        statusEl.innerHTML = `<span class="ok">Done ✅</span>`;
-        renderResult(data);
+        setStatusOk("Done ✅");
 
-        // Save text-only local history
+        // show results (supports envelope)
+        renderResultEnvelope(data);
+
+        // save a text-only history entry
         addToLocalHistory({
           created_at: nowIso(),
-          scan_payload: data
+          result: data
         });
 
-        // Refresh shared history
+        // refresh team history
         await refreshTeamHistory();
 
       } catch (e) {
         console.error(e);
-        statusEl.innerHTML = `<span class="err">Error:</span> ${escapeHtml(e.message)}`;
+        setStatusErr(e?.message || e);
         resultEl.innerHTML = "";
       } finally {
+        analyzeBtn.disabled = false;
         updateAnalyzeEnabled();
       }
     }
@@ -1098,10 +903,16 @@
     // =========================
     // Init
     // =========================
+    // Default: no mode chosen (forced)
+    setMode(null); // clears selection
+
     renderLocalHistory();
     refreshTeamHistory();
-    ensureModeChosen(); // show prompt until user picks one
     updateAnalyzeEnabled();
+
+    // Make sure clicking the fake “boxes” doesn’t show checks before selection
+    modeOneWrap.classList.remove("selected");
+    modeManyWrap.classList.remove("selected");
   </script>
 </body>
 </html>
