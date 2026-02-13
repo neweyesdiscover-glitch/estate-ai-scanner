@@ -1,9 +1,8 @@
 <!-- frontend/index.html
      ✅ Estate AI Scanner — Camera + Local History + Shared Team History
      - NO login logic in frontend (backend handles /login redirect)
-     - Step 1: choose One vs Many (forced)
-     - Multi-photo scan (up to 4 photos)
-     - Local history uses compressed thumbnails to avoid quota
+     - "Use Camera" opens rear camera on phones
+     - Local History saved per device (localStorage) (kept minimal to avoid quota)
      - Team History pulled from server (shared)
 -->
 
@@ -16,22 +15,34 @@
   <style>
     body { font-family: Arial, sans-serif; padding: 24px; max-width: 1100px; margin: 0 auto; }
     h1 { margin: 0 0 6px; }
-    .sub { margin: 0 0 16px; color: #555; line-height: 1.35; }
-
-    .card { border: 1px solid #ddd; border-radius: 14px; padding: 14px; background: #fff; }
-    .card h3 { margin: 0 0 10px; }
+    .sub { margin: 0 0 16px; color: #555; }
 
     .grid { display: grid; grid-template-columns: 360px 1fr; gap: 18px; }
     @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
 
-    .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 10px 0 18px; }
-    button { padding: 10px 14px; border-radius: 10px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
-    button.primary { background: #2b7cff; color: #fff; border-color: #2b7cff; font-weight: 800; }
-    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    .card { border: 1px solid #ddd; border-radius: 14px; padding: 14px; background: #fff; }
+    .card h3 { margin: 0 0 10px; }
 
-    .pill { display:inline-flex; align-items:center; gap:8px; padding: 6px 10px; border-radius: 999px; border: 1px solid #e6e6e6; background: #fafafa; font-size: 12px; color:#333; }
-    .pill strong { font-weight: 900; }
-    .sharedPill { background: #f2f7ff; border-color: #cfe2ff; color: #1b5dbf; }
+    button {
+      padding: 11px 14px;
+      border-radius: 10px;
+      border: 1px solid #ccc;
+      background: #fff;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button.primary {
+      background: #2b7cff;
+      color: #fff;
+      border-color: #2b7cff;
+      font-weight: 800;
+    }
+    button.secondary {
+      background: #f7f7f7;
+      border-color: #e5e5e5;
+      font-weight: 700;
+    }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
 
     #preview {
       width: 100%;
@@ -40,130 +51,170 @@
       border-radius: 12px;
       border: 1px solid #eee;
       display: none;
-      background: #fafafa;
     }
 
     .status { margin: 8px 0 0; color: #666; font-size: 13px; }
-    .ok { color: #0a7a0a; font-weight: 900; }
-    .err { color: #b00020; font-weight: 900; }
+    .ok { color: #0a7a0a; font-weight: 800; }
+    .err { color: #b00020; font-weight: 800; }
 
-    .stepBox { border: 1px solid #eee; background: #fbfbfb; border-radius: 14px; padding: 14px; margin-bottom: 14px; }
-    .stepTitle { font-weight: 900; margin-bottom: 8px; }
-    .stepRow { display:flex; gap:10px; flex-wrap: wrap; align-items: center; }
-    .stepHint { color:#666; font-size: 13px; margin-top: 6px; }
-
-    /* Checkbox-style mode choices */
-    .modeChoice {
-      display:flex;
-      align-items:center;
-      gap:10px;
-      padding: 10px 12px;
-      border-radius: 12px;
-      border: 1px solid #e6e6e6;
-      background: #fff;
-      cursor: pointer;
-      user-select: none;
-      min-width: 220px;
-    }
-    .modeChoice:hover { background:#fafafa; }
-    .modeChoice.selected { border-color:#2b7cff; box-shadow: 0 0 0 3px rgba(43,124,255,0.12); }
-    .modeChoice input { width: 18px; height: 18px; }
-    .modeText { display:flex; flex-direction: column; gap:2px; }
-    .modeText .label { font-weight: 900; color:#111; }
-    .modeText .desc { font-size: 12px; color:#666; }
-
-    .infoIcon {
-      width: 18px;
-      height: 18px;
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
       border-radius: 999px;
-      border: 1px solid #cfcfcf;
+      border: 1px solid #e5e5e5;
+      background: #fafafa;
       font-size: 12px;
-      color:#333;
-      background:#fff;
-      cursor: pointer;
+      color: #444;
+      font-weight: 700;
+      white-space: nowrap;
     }
 
-    /* Modal */
-    .modalBackdrop {
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.35);
-      display: none;
+    .stepBox {
+      border: 1px solid #eee;
+      background: #fbfbfb;
+      border-radius: 14px;
+      padding: 12px;
+      margin: 0 0 12px;
+    }
+    .stepTitle {
+      display: flex;
+      gap: 10px;
+      align-items: baseline;
+      margin: 0 0 8px;
+      font-weight: 900;
+      color: #111;
+    }
+    .stepNum {
+      display: inline-flex;
       align-items: center;
       justify-content: center;
-      padding: 18px;
-      z-index: 9999;
+      width: 26px;
+      height: 26px;
+      border-radius: 10px;
+      background: #111;
+      color: #fff;
+      font-size: 13px;
     }
-    .modal {
-      width: 100%;
-      max-width: 560px;
-      background: #fff;
-      border-radius: 16px;
-      border: 1px solid #e6e6e6;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.15);
-      overflow: hidden;
-    }
-    .modalHeader { padding: 14px 16px; border-bottom: 1px solid #eee; display:flex; align-items:center; justify-content: space-between; gap: 12px; }
-    .modalHeader strong { font-size: 16px; }
-    .modalBody { padding: 14px 16px; color:#333; line-height: 1.4; }
-    .modalBody ul { margin: 8px 0 0 18px; }
-    .modalFooter { padding: 12px 16px; border-top: 1px solid #eee; display:flex; justify-content:flex-end; }
-    .modalClose { border: 1px solid #ccc; background:#fff; border-radius: 10px; padding: 8px 12px; cursor:pointer; }
+    .stepHelp { color: #555; font-size: 13px; margin: 0 0 10px; }
 
-    /* History */
-    .historyList { display: flex; flex-direction: column; gap: 10px; }
-    .historyItem {
-      display: grid;
-      grid-template-columns: 72px 1fr;
+    .modeRow {
+      display: flex;
+      flex-wrap: wrap;
       gap: 10px;
       align-items: center;
-      border: 1px solid #eee;
+    }
+    .modeOption {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border: 1px solid #e7e7e7;
       border-radius: 12px;
-      padding: 10px;
-      cursor: pointer;
       background: #fff;
     }
-    .historyItem:hover { background: #fafafa; }
-    .historyItem.selected { border-color:#2b7cff; box-shadow: 0 0 0 3px rgba(43,124,255,0.12); }
-    .thumb { width: 72px; height: 72px; object-fit: cover; border-radius: 10px; border: 1px solid #eee; background:#f6f6f6; }
-    .thumbPlaceholder { display:flex; align-items:center; justify-content:center; font-size: 11px; color:#777; }
-    .historyMeta { font-size: 13px; color: #444; }
-    .historyMeta .title { font-weight: 900; color: #111; margin-bottom: 2px; font-size: 14px; }
-    .historyMeta .time { color: #666; font-size: 12px; margin-top: 2px; }
-    .historyMeta .line { color:#333; margin-top: 2px; }
+    .modeOption input { transform: scale(1.15); }
+    .modeText { display: flex; flex-direction: column; gap: 2px; }
+    .modeText .label { font-weight: 900; color: #111; font-size: 14px; }
+    .modeText .desc { color: #666; font-size: 12px; }
+    .infoBtn {
+      width: 28px;
+      height: 28px;
+      border-radius: 999px;
+      border: 1px solid #e5e5e5;
+      background: #fff;
+      font-weight: 900;
+      cursor: pointer;
+      line-height: 26px;
+      text-align: center;
+      padding: 0;
+    }
 
-    /* Result cards */
-    .resultWrap { display:flex; flex-direction: column; gap: 12px; }
-    .resultCard {
-      border: 1px solid #eee;
-      border-radius: 14px;
-      padding: 12px;
-      background: #fcfcfc;
-      display:flex;
-      flex-direction: column;
+    .photoButtons {
+      display: grid;
+      grid-template-columns: 1fr;
       gap: 10px;
     }
-    .resultHeaderRow { display:flex; align-items:flex-start; justify-content: space-between; gap: 10px; }
-    .resultName { font-size: 22px; font-weight: 900; color:#111; line-height: 1.1; }
-    .resultType { font-size: 12px; color:#666; margin-top: 3px; font-weight: 700; }
+    .photoButtons button {
+      width: 100%;
+      text-align: left;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 14px;
+    }
+    .photoButtons .hint {
+      font-size: 12px;
+      color: #666;
+      font-weight: 600;
+    }
 
-    .priceGrid { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    @media (max-width: 520px) { .priceGrid { grid-template-columns: 1fr; } }
-
-    .priceBox {
-      border: 1px solid #eee;
+    .tips {
+      margin-top: 10px;
       border-radius: 14px;
+      background: #f6f6f6;
+      border: 1px solid #eee;
+      padding: 12px;
+      color: #333;
+      font-size: 14px;
+      line-height: 1.35;
+    }
+    .tips strong { display: block; margin-bottom: 6px; }
+
+    .resultHeader {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .resultTitle {
+      font-size: 20px;
+      font-weight: 900;
+      margin: 0;
+    }
+
+    .resultCards { display: grid; grid-template-columns: 1fr; gap: 12px; }
+    .itemCard {
+      border: 1px solid #eee;
+      border-radius: 16px;
+      padding: 14px;
       background: #fff;
+    }
+    .itemCard.selected {
+      border-color: #2b7cff;
+      box-shadow: 0 0 0 3px rgba(43,124,255,0.12);
+    }
+    .itemTop {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 10px;
+    }
+    .itemName {
+      font-weight: 900;
+      font-size: 20px;
+      margin: 0;
+      color: #111;
+      line-height: 1.15;
+    }
+    .metrics {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 12px;
+    }
+    .metricBox {
+      border: 1px solid #eee;
+      background: #fafafa;
+      border-radius: 14px;
       padding: 12px;
     }
-    .priceLabel { font-size: 12px; color:#666; font-weight: 800; margin-bottom: 6px; }
-    .priceValue { font-size: 22px; font-weight: 900; color:#111; }
+    .metricLabel { font-size: 12px; color: #666; margin-bottom: 6px; }
+    .metricValue { font-size: 22px; font-weight: 900; color: #111; }
 
-    details { border: 1px solid #eee; border-radius: 14px; background:#fff; padding: 10px 12px; }
-    summary { cursor:pointer; font-weight: 900; color:#222; }
+    details { margin-top: 12px; }
     pre {
       white-space: pre-wrap;
       word-break: break-word;
@@ -172,127 +223,230 @@
       padding: 10px;
       border-radius: 12px;
       margin: 10px 0 0;
+      font-size: 12px;
     }
 
-    .tipsBox {
-      background: #f6f6f6;
+    .historyList { display: flex; flex-direction: column; gap: 10px; }
+    .historyItem {
+      display: grid;
+      grid-template-columns: 72px 1fr;
+      gap: 10px;
+      align-items: center;
       border: 1px solid #eee;
-      border-radius: 14px;
-      padding: 12px;
-      color:#333;
-      line-height: 1.35;
+      border-radius: 12px;
+      padding: 8px;
+      cursor: pointer;
+      background: #fff;
+      transition: box-shadow 0.12s ease, border-color 0.12s ease, transform 0.02s ease;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
     }
-    .tipsBox b { font-weight: 900; }
+    .historyItem:hover { background: #fafafa; }
+    .historyItem:active { transform: scale(0.995); }
+    .historyItem.selected {
+      border-color: #2b7cff;
+      box-shadow: 0 0 0 3px rgba(43,124,255,0.12);
+    }
+    .thumb { width: 72px; height: 72px; object-fit: cover; border-radius: 10px; border: 1px solid #eee; }
+    .historyMeta { font-size: 13px; color: #444; }
+    .historyMeta .title { font-weight: 900; color: #111; margin-bottom: 2px; }
+    .historyMeta .time { color: #666; font-size: 12px; }
+    .historyMeta .sharedTag {
+      display: inline-block;
+      margin-top: 6px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid #dbe7ff;
+      background: #edf4ff;
+      color: #1f5bd6;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .sectionTop {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .sectionTop h3 { margin: 0; }
+    .sectionBtnRow {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
     .small { font-size: 12px; color: #666; margin-top: 10px; }
+    .hidden { display: none !important; }
+
+    /* Simple modal */
+    .modalBackdrop {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.45);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+      z-index: 9999;
+    }
+    .modal {
+      width: 100%;
+      max-width: 520px;
+      background: #fff;
+      border-radius: 16px;
+      border: 1px solid #eee;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+      padding: 14px;
+    }
+    .modal h4 { margin: 0 0 8px; font-size: 16px; }
+    .modal p { margin: 0 0 12px; color: #444; font-size: 14px; line-height: 1.35; }
+    .modalActions { display: flex; justify-content: flex-end; gap: 10px; }
   </style>
 </head>
 
 <body>
   <h1>Estate AI Scanner</h1>
-  <p class="sub">
-    Identify and price items fast for estate sales.
-    <br/>
-    <b>Start by choosing “One Item” or “Many Items”, then add up to 4 photos.</b>
-  </p>
+  <p class="sub" id="subtitle">Identify and price items fast. Start by choosing what you’re pricing and adding photos.</p>
 
-  <!-- Hidden inputs: Camera + Gallery -->
+  <!-- Hidden inputs: Camera + Gallery + Detail Photo -->
   <input id="cameraInput" type="file" accept="image/*" capture="environment" style="display:none" />
   <input id="galleryInput" type="file" accept="image/*" style="display:none" />
   <input id="detailInput" type="file" accept="image/*" style="display:none" />
-
-  <!-- Modal -->
-  <div id="modalBackdrop" class="modalBackdrop" onclick="closeModal(event)">
-    <div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
-      <div class="modalHeader">
-        <strong id="modalTitle">Info</strong>
-        <button class="modalClose" onclick="hideModal()">Close</button>
-      </div>
-      <div class="modalBody" id="modalBody"></div>
-      <div class="modalFooter">
-        <button class="modalClose" onclick="hideModal()">Got it</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Step 1 -->
-  <div class="stepBox">
-    <div class="stepTitle">Step 1 — Price mode (required)</div>
-    <div class="stepRow">
-      <div class="modeChoice" id="modeOneBox" onclick="setMode('single')">
-        <input id="modeOne" type="checkbox" />
-        <div class="modeText">
-          <div class="label">One Item</div>
-          <div class="desc">Best for one main object (e.g., one vase, one tool, one book).</div>
-        </div>
-        <span class="infoIcon" title="When to use One Item" onclick="openModeInfo(event,'single')">i</span>
-      </div>
-
-      <div class="modeChoice" id="modeManyBox" onclick="setMode('multi')">
-        <input id="modeMany" type="checkbox" />
-        <div class="modeText">
-          <div class="label">Many Items</div>
-          <div class="desc">Best for a table/shelf of items or a “lot” photo.</div>
-        </div>
-        <span class="infoIcon" title="When to use Many Items" onclick="openModeInfo(event,'multi')">i</span>
-      </div>
-    </div>
-    <div class="stepHint" id="modeHint">
-      Choose a mode to unlock photo + analysis buttons.
-    </div>
-  </div>
-
-  <!-- Step 2 -->
-  <div class="stepBox">
-    <div class="stepTitle">Step 2 — Add photos (up to 4)</div>
-    <div class="controls">
-      <button id="cameraBtn" onclick="openCamera()" disabled>Use Camera</button>
-      <button id="galleryBtn" onclick="openGallery()" disabled>Choose From Photos</button>
-      <button id="detailBtn" onclick="openDetail()" disabled>Add Detail Photo</button>
-
-      <button id="analyzeBtn" class="primary" onclick="analyze()" disabled>Identify and Price my item(s)</button>
-
-      <button onclick="refreshTeamHistory()">Refresh Team History</button>
-      <button onclick="clearLocalHistory()">Clear Local History</button>
-    </div>
-
-    <div class="tipsBox">
-      <b>Scan tips:</b>
-      <ul style="margin: 8px 0 0 18px;">
-        <li>Add close-up photos of stamps, markings, signatures, or crisp edges.</li>
-        <li>If results are unclear or items are missed, take a brighter and closer photo.</li>
-      </ul>
-      <div style="margin-top:10px;">
-        <b>Limits:</b> Max photos per scan: <b>4</b>. Max items in multi-item mode: <b>8</b>.
-      </div>
-    </div>
-  </div>
 
   <div class="grid">
     <div class="card">
       <h3>Preview</h3>
       <img id="preview" alt="Preview" />
-      <div id="previewHint" class="status">Choose a price mode, then add a photo to begin.</div>
+      <div id="previewHint" class="status">Choose a pricing mode, then add photos.</div>
 
-      <div class="small" id="photoCount"></div>
+      <div class="tips">
+        <strong>Scan tips:</strong>
+        • Add close-up photos of stamps, markings, signatures, or crisp edges.<br/>
+        • If results are unclear or items are missed, take a brighter and closer photo.<br/><br/>
+        <strong>Limits:</strong> Max photos per scan: <b>4</b>. Max items in multi-item mode: <b>8</b>.
+      </div>
+
+      <div class="small">
+        Tip: On phones, “Use Camera” should open the rear camera automatically.
+      </div>
     </div>
 
     <div class="card">
-      <h3>Result</h3>
-      <div id="status" class="status"></div>
-      <div id="result" class="resultWrap"></div>
-      <div id="rawWrap" style="margin-top:10px; display:none;"></div>
+      <!-- Step 1 -->
+      <div class="stepBox">
+        <div class="stepTitle">
+          <span class="stepNum">1</span>
+          <span>Choose what you want to price</span>
+        </div>
+        <p class="stepHelp">Price one clear item, or price several items in one photo.</p>
+
+        <div class="modeRow">
+          <label class="modeOption">
+            <input type="checkbox" id="modeSingle" />
+            <span class="modeText">
+              <span class="label">Price: One Item</span>
+              <span class="desc">Best for one object per scan</span>
+            </span>
+            <button class="infoBtn" type="button" onclick="openModeInfo('single')" aria-label="One Item info">i</button>
+          </label>
+
+          <label class="modeOption">
+            <input type="checkbox" id="modeMulti" />
+            <span class="modeText">
+              <span class="label">Price: Many Items</span>
+              <span class="desc">Detect up to 8 items in one photo</span>
+            </span>
+            <button class="infoBtn" type="button" onclick="openModeInfo('multi')" aria-label="Many Items info">i</button>
+          </label>
+        </div>
+
+        <div id="modeError" class="status err hidden">Please select One Item or Many Items to continue.</div>
+      </div>
+
+      <!-- Step 2 -->
+      <div class="stepBox">
+        <div class="stepTitle">
+          <span class="stepNum">2</span>
+          <span>Select an option to Add Photos</span>
+        </div>
+        <p class="stepHelp">Add a main photo first. Then (optional) add up to 3 detail photos for markings, labels, or close-ups.</p>
+
+        <div class="photoButtons">
+          <button type="button" class="secondary" onclick="openCamera()">
+            <span>Use Camera</span>
+            <span class="hint">Main photo</span>
+          </button>
+
+          <button type="button" class="secondary" onclick="openGallery()">
+            <span>Choose From Photos</span>
+            <span class="hint">Main photo</span>
+          </button>
+
+          <button type="button" class="secondary" onclick="openDetailPhoto()">
+            <span>Add Detail Photo</span>
+            <span class="hint">Up to 3 extras</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Step 3 -->
+      <div class="stepBox">
+        <div class="stepTitle">
+          <span class="stepNum">3</span>
+          <span>Identify & price</span>
+        </div>
+        <p class="stepHelp">Select <b>Identify and Price my item(s)</b> to see results.</p>
+
+        <button id="analyzeBtn" class="primary" style="width:100%;" onclick="analyze()" disabled>
+          Identify and Price my item(s)
+        </button>
+      </div>
+
+      <div class="resultHeader">
+        <div>
+          <div id="status" class="status"></div>
+        </div>
+      </div>
+
+      <div id="result"></div>
     </div>
 
+    <!-- Team History -->
     <div class="card" style="grid-column: 1 / -1;">
-      <h3>Team History (shared)</h3>
+      <div class="sectionTop">
+        <h3>Team History (shared)</h3>
+        <div class="sectionBtnRow">
+          <button type="button" onclick="refreshTeamHistory()">Refresh Team History</button>
+        </div>
+      </div>
+
       <div id="teamHistory" class="historyList"></div>
       <div id="teamEmpty" class="status">No team scans yet.</div>
     </div>
 
+    <!-- Local History -->
     <div class="card" style="grid-column: 1 / -1;">
-      <h3>Local History (this device)</h3>
+      <div class="sectionTop">
+        <h3>Local History (this device)</h3>
+        <div class="sectionBtnRow">
+          <button type="button" onclick="clearLocalHistory()">Clear Local History</button>
+        </div>
+      </div>
+
       <div id="history" class="historyList"></div>
       <div id="historyEmpty" class="status">No local scans saved yet.</div>
+    </div>
+  </div>
+
+  <!-- Mode Info Modal -->
+  <div id="modalBackdrop" class="modalBackdrop" onclick="closeModalIfBackdrop(event)">
+    <div class="modal">
+      <h4 id="modalTitle">Info</h4>
+      <p id="modalBody"></p>
+      <div class="modalActions">
+        <button type="button" class="primary" onclick="closeModal()">Got it</button>
+      </div>
     </div>
   </div>
 
@@ -303,25 +457,11 @@
     const cameraInput = document.getElementById("cameraInput");
     const galleryInput = document.getElementById("galleryInput");
     const detailInput = document.getElementById("detailInput");
-
     const preview = document.getElementById("preview");
     const previewHint = document.getElementById("previewHint");
-    const photoCountEl = document.getElementById("photoCount");
-
     const statusEl = document.getElementById("status");
     const resultEl = document.getElementById("result");
-    const rawWrap = document.getElementById("rawWrap");
-
     const analyzeBtn = document.getElementById("analyzeBtn");
-    const cameraBtn = document.getElementById("cameraBtn");
-    const galleryBtn = document.getElementById("galleryBtn");
-    const detailBtn = document.getElementById("detailBtn");
-
-    const modeOne = document.getElementById("modeOne");
-    const modeMany = document.getElementById("modeMany");
-    const modeOneBox = document.getElementById("modeOneBox");
-    const modeManyBox = document.getElementById("modeManyBox");
-    const modeHint = document.getElementById("modeHint");
 
     const historyEl = document.getElementById("history");
     const historyEmptyEl = document.getElementById("historyEmpty");
@@ -329,28 +469,38 @@
     const teamHistoryEl = document.getElementById("teamHistory");
     const teamEmptyEl = document.getElementById("teamEmpty");
 
+    const modeSingleEl = document.getElementById("modeSingle");
+    const modeMultiEl = document.getElementById("modeMulti");
+    const modeErrorEl = document.getElementById("modeError");
+
+    // Modal
     const modalBackdrop = document.getElementById("modalBackdrop");
     const modalTitle = document.getElementById("modalTitle");
     const modalBody = document.getElementById("modalBody");
 
     // =========================
-    // Config
+    // Local state
     // =========================
-    const MAX_PHOTOS_PER_SCAN = 4;
-    const MAX_ITEMS_MULTI = 8;
+    let selectedFile = null;        // main photo file
+    let selectedDataUrl = null;     // main photo dataURL (used only for preview; NOT stored in localHistory)
+    let lastObjectUrl = null;
 
-    const LOCAL_HISTORY_KEY = "estate_ai_local_history_v2";
+    // Detail photos (up to 3)
+    const detailFiles = [];         // File[]
+    const detailObjectUrls = [];    // string[]
+
+    // Selection highlights
+    let selectedTeamScanId = null;
+    let selectedLocalIndex = null;
+
+    // Local history (keep tiny to avoid quota)
+    const LOCAL_HISTORY_KEY = "estate_ai_local_history_v1";
     const LOCAL_HISTORY_LIMIT = 25;
 
-    // =========================
-    // State
-    // =========================
-    let analysisMode = "";          // 'single' or 'multi' (forced)
-    let selectedFiles = [];         // up to 4
-    let selectedThumbDataUrl = null; // compressed thumb for local history
-
-    let lastSelectedTeamId = null;
-    let lastSelectedLocalIndex = null;
+    // Limits
+    const MAX_PHOTOS_PER_SCAN = 4; // 1 main + up to 3 details
+    const MAX_DETAIL_PHOTOS = 3;
+    const MAX_MULTI_ITEMS = 8;
 
     // =========================
     // Helpers
@@ -364,10 +514,13 @@
         .replaceAll("'", "&#039;");
     }
 
-    function nowIso() { return new Date().toISOString(); }
+    function nowIso() {
+      return new Date().toISOString();
+    }
 
     function formatTime(iso) {
-      try { return new Date(iso).toLocaleString(); } catch { return iso; }
+      try { return new Date(iso).toLocaleString(); }
+      catch { return iso; }
     }
 
     function stripCodeFences(s) {
@@ -381,173 +534,55 @@
       try { return JSON.parse(stripCodeFences(text)); } catch { return { detail: text }; }
     }
 
-    function formatMoney(x) {
-      if (x == null) return "—";
-      if (typeof x === "number") return `$${x}`;
-      if (typeof x === "string") return x.startsWith("$") ? x : x;
-      if (typeof x === "object") {
-        const low = x.low ?? x.min ?? 0;
-        const high = x.high ?? x.max ?? 0;
-        if (low && high) return `$${low} – $${high}`;
-        if (low && !high) return `$${low}+`;
-        if (!low && high) return `Up to $${high}`;
-      }
-      return "—";
+    function setModeError(show) {
+      modeErrorEl.classList.toggle("hidden", !show);
     }
 
-    function bundleRangeText(bundle) {
-      if (!bundle || typeof bundle !== "object") return "—";
-      const min = bundle.min ?? bundle.low ?? 0;
-      const max = bundle.max ?? bundle.high ?? 0;
-      if (!min && !max) return "—";
-      if (min && max) return `$${min} – $${max}`;
-      if (min && !max) return `$${min}+`;
-      return `Up to $${max}`;
+    function getSelectedMode() {
+      if (modeSingleEl.checked) return "single";
+      if (modeMultiEl.checked) return "multi";
+      return null;
     }
 
     function ensureModeChosen() {
-      const ok = (analysisMode === "single" || analysisMode === "multi");
-      cameraBtn.disabled = !ok;
-      galleryBtn.disabled = !ok;
-      detailBtn.disabled = !ok;
+      const mode = getSelectedMode();
+      setModeError(!mode);
+      return !!mode;
+    }
 
-      const hasPhotos = selectedFiles.length > 0;
-      analyzeBtn.disabled = !(ok && hasPhotos);
-
-      return ok;
+    function updateAnalyzeEnabled() {
+      // Must pick mode and have a main photo and have main photo loaded
+      const modeOk = !!getSelectedMode();
+      const photoOk = !!selectedFile && !!selectedDataUrl;
+      analyzeBtn.disabled = !(modeOk && photoOk);
     }
 
     // =========================
-    // Modal
+    // Modal info
     // =========================
-    function showModal(title, html) {
-      modalTitle.textContent = title;
-      modalBody.innerHTML = html;
+    function openModeInfo(which) {
+      if (which === "single") {
+        modalTitle.textContent = "One Item (recommended)";
+        modalBody.textContent =
+          "Use One Item when you have a clear photo of a single object. This usually gives the most accurate identification and pricing. Add detail photos for markings, labels, stamps, signatures, or close-ups.";
+      } else {
+        modalTitle.textContent = "Many Items (multi-item mode)";
+        modalBody.textContent =
+          `Use Many Items when you want the app to detect several objects in one photo (up to ${MAX_MULTI_ITEMS}). For best results, keep items spread out and well-lit. If something is missed, take a closer/brighter photo or switch to One Item for that object.`;
+      }
       modalBackdrop.style.display = "flex";
     }
-    function hideModal() {
+
+    function closeModal() {
       modalBackdrop.style.display = "none";
     }
-    function closeModal(e) {
-      // click outside modal closes
-      hideModal();
-    }
 
-    function openModeInfo(e, mode) {
-      e.stopPropagation();
-      if (mode === "single") {
-        showModal(
-          "When to use One Item",
-          `
-          <div>
-            Use <b>One Item</b> when you want the best accuracy on a single main object.
-            <ul>
-              <li>One vase, one lamp, one tool, one book, one piece of jewelry</li>
-              <li>Best when the item fills most of the photo</li>
-              <li>Use <b>Add Detail Photo</b> for markings, stamps, signatures, labels</li>
-            </ul>
-          </div>
-          `
-        );
-      } else {
-        showModal(
-          "When to use Many Items",
-          `
-          <div>
-            Use <b>Many Items</b> for a group/lot photo (table, shelf, pile, box).
-            <ul>
-              <li>We’ll identify up to <b>${MAX_ITEMS_MULTI}</b> distinct items</li>
-              <li>Also returns a suggested <b>bundle / lot range</b></li>
-              <li>If something is missed, take a brighter/closer photo (or crop)</li>
-            </ul>
-          </div>
-          `
-        );
-      }
+    function closeModalIfBackdrop(e) {
+      if (e.target === modalBackdrop) closeModal();
     }
 
     // =========================
-    // Step 1: Mode selection (checkbox style, mutually exclusive)
-    // =========================
-    function setMode(mode) {
-      analysisMode = (mode === "multi") ? "multi" : "single";
-
-      // Mutually exclusive checkboxes
-      modeOne.checked = (analysisMode === "single");
-      modeMany.checked = (analysisMode === "multi");
-
-      // Visual
-      modeOneBox.classList.toggle("selected", analysisMode === "single");
-      modeManyBox.classList.toggle("selected", analysisMode === "multi");
-
-      modeHint.innerHTML = `<span class="ok">Selected:</span> ${analysisMode === "single" ? "One Item" : "Many Items"}. Now add photo(s).`;
-
-      previewHint.textContent = "Add a photo to begin.";
-      ensureModeChosen();
-    }
-
-    // Prevent direct checkbox toggles causing both off
-    modeOne.addEventListener("click", (e) => { e.preventDefault(); setMode("single"); });
-    modeMany.addEventListener("click", (e) => { e.preventDefault(); setMode("multi"); });
-
-    // =========================
-    // Photo selection / preview
-    // =========================
-    function openCamera() { if (!ensureModeChosen()) return; cameraInput.value = ""; cameraInput.click(); }
-    function openGallery() { if (!ensureModeChosen()) return; galleryInput.value = ""; galleryInput.click(); }
-    function openDetail() { if (!ensureModeChosen()) return; detailInput.value = ""; detailInput.click(); }
-
-    async function compressToThumb(file, maxW = 360, quality = 0.65) {
-      // Returns small JPEG dataURL to avoid localStorage quota issues
-      const imgUrl = URL.createObjectURL(file);
-      const img = new Image();
-      img.src = imgUrl;
-      await img.decode().catch(() => {});
-      const canvas = document.createElement("canvas");
-      const scale = Math.min(1, maxW / (img.width || maxW));
-      canvas.width = Math.max(1, Math.round((img.width || maxW) * scale));
-      canvas.height = Math.max(1, Math.round((img.height || maxW) * scale));
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      URL.revokeObjectURL(imgUrl);
-      return canvas.toDataURL("image/jpeg", quality);
-    }
-
-    async function addFiles(files) {
-      if (!ensureModeChosen()) return;
-
-      const arr = Array.from(files || []).filter(Boolean);
-      if (!arr.length) return;
-
-      // Enforce max 4 total
-      const remaining = MAX_PHOTOS_PER_SCAN - selectedFiles.length;
-      const toAdd = arr.slice(0, remaining);
-
-      selectedFiles = selectedFiles.concat(toAdd);
-
-      // Preview uses first image
-      const first = selectedFiles[0];
-      if (first) {
-        const objUrl = URL.createObjectURL(first);
-        preview.src = objUrl;
-        preview.style.display = "block";
-        previewHint.textContent = "Ready to analyze.";
-        // set a compressed thumb from first photo for local history
-        selectedThumbDataUrl = await compressToThumb(first);
-        // clean object URL after the image loads
-        preview.onload = () => URL.revokeObjectURL(objUrl);
-      }
-
-      photoCountEl.textContent = `Photos selected: ${selectedFiles.length} / ${MAX_PHOTOS_PER_SCAN}`;
-      ensureModeChosen();
-    }
-
-    cameraInput.addEventListener("change", async () => addFiles(cameraInput.files));
-    galleryInput.addEventListener("change", async () => addFiles(galleryInput.files));
-    detailInput.addEventListener("change", async () => addFiles(detailInput.files));
-
-    // =========================
-    // Local history (compressed thumbs)
+    // Local history (device) - TEXT ONLY to avoid quota issues
     // =========================
     function readLocalHistory() {
       try {
@@ -559,14 +594,7 @@
     }
 
     function writeLocalHistory(items) {
-      try {
-        localStorage.setItem(LOCAL_HISTORY_KEY, JSON.stringify(items));
-      } catch (e) {
-        // If quota is exceeded, fall back to saving without thumbs
-        console.warn("LocalStorage quota issue, saving without thumbnails.", e);
-        const stripped = items.map(x => ({ ...x, thumb: null }));
-        try { localStorage.setItem(LOCAL_HISTORY_KEY, JSON.stringify(stripped)); } catch {}
-      }
+      localStorage.setItem(LOCAL_HISTORY_KEY, JSON.stringify(items));
     }
 
     function addToLocalHistory(entry) {
@@ -578,12 +606,166 @@
 
     function clearLocalHistory() {
       localStorage.removeItem(LOCAL_HISTORY_KEY);
+      selectedLocalIndex = null;
       renderLocalHistory();
       statusEl.textContent = "";
       resultEl.innerHTML = "";
-      rawWrap.style.display = "none";
     }
 
+    // =========================
+    // Result rendering (new JSON format)
+    // Expected shape from backend:
+    // { scan_id, created_at, analysis_mode, result: { items: [...], bundle_price_range: {min,max} or {low,high}, advice: [] } }
+    // =========================
+    function moneyVal(v) {
+      if (v === null || v === undefined || v === "") return "—";
+      if (typeof v === "number") return "$" + v;
+      if (typeof v === "string") {
+        // If already has $, return as-is
+        return v.trim().startsWith("$") ? v.trim() : v.trim();
+      }
+      if (typeof v === "object") {
+        // e.g. {low,high} or {min,max}
+        const low = v.low ?? v.min;
+        const high = v.high ?? v.max;
+        if (typeof low === "number" && typeof high === "number") {
+          if (low === high) return "$" + low;
+          return "$" + low + " – $" + high;
+        }
+      }
+      return "—";
+    }
+
+    function firstNonEmpty(...vals) {
+      for (const v of vals) {
+        if (v === null || v === undefined) continue;
+        if (typeof v === "string" && v.trim() === "") continue;
+        return v;
+      }
+      return null;
+    }
+
+    function normalizeScanPayload(data) {
+      // If backend sometimes returns {items:[...]} directly, wrap it.
+      if (data && typeof data === "object" && Array.isArray(data.items) && !data.result) {
+        return {
+          scan_id: data.scan_id ?? null,
+          created_at: data.created_at ?? null,
+          analysis_mode: data.analysis_mode ?? data.mode ?? null,
+          result: {
+            items: data.items,
+            bundle_price_range: data.bundle_price_range ?? data.bundle_price ?? null,
+            advice: data.advice ?? data.suggestions ?? data.notes ?? null
+          }
+        };
+      }
+      return data;
+    }
+
+    function renderResult(data) {
+      const payload = normalizeScanPayload(data);
+
+      // Clear selection highlight on new render
+      document.querySelectorAll(".itemCard.selected").forEach(el => el.classList.remove("selected"));
+
+      if (!payload || typeof payload !== "object") {
+        resultEl.innerHTML = `<pre>${escapeHtml(String(payload))}</pre>`;
+        return;
+      }
+
+      if (payload.error) {
+        statusEl.innerHTML = `<span class="err">Error:</span> ${escapeHtml(payload.error)}`;
+        if (payload.details) {
+          resultEl.innerHTML = `<pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre>`;
+        } else if (payload.raw) {
+          resultEl.innerHTML = `<pre>${escapeHtml(payload.raw)}</pre>`;
+        }
+        return;
+      }
+
+      const result = payload.result || {};
+      const items = Array.isArray(result.items) ? result.items : [];
+      const bundle = result.bundle_price_range || result.bundle_price || result.bundle || null;
+
+      if (!items.length) {
+        // show friendly empty state + raw json toggle
+        const pricingHint = firstNonEmpty(result.pricing_estimates, result.pricing_estimate, result.suggestions, null);
+        resultEl.innerHTML = `
+          <div class="itemCard">
+            <div class="itemTop">
+              <div>
+                <div class="itemName">Result</div>
+                <div class="status" style="margin-top:6px;">
+                  No items detected. Try a closer/brighter photo or check raw JSON.
+                </div>
+                ${pricingHint ? `<div class="status" style="margin-top:6px;">${escapeHtml(String(pricingHint))}</div>` : ""}
+              </div>
+            </div>
+            <details>
+              <summary><b>Show raw JSON</b></summary>
+              <pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre>
+            </details>
+          </div>
+        `;
+        return;
+      }
+
+      const cardsHtml = items.map((it, idx) => {
+        const name = firstNonEmpty(it.name, it.title, it.item_name, `Item ${idx + 1}`);
+        const desc = firstNonEmpty(it.description, it.details, it.condition, it.condition_notes, it.brand_or_origin, it.type, "");
+        const est = it.estimated_price ?? it.estimated_value ?? it.suggested_listing_price ?? it.estimated_value_range ?? it.price ?? it.pricing_estimate ?? null;
+
+        // if estimated_price is object {low,high}
+        const suggested = it.suggested_listing_price ?? it.list_price ?? it.estimated_price ?? est ?? null;
+
+        return `
+          <div class="itemCard" data-item-index="${idx}">
+            <div class="itemTop">
+              <div style="min-width:0;">
+                <div class="itemName">${escapeHtml(String(name))}</div>
+                ${desc ? `<div class="status" style="margin-top:6px;">${escapeHtml(String(desc))}</div>` : ""}
+              </div>
+              <span class="pill">Shared with your team</span>
+            </div>
+
+            <div class="metrics">
+              <div class="metricBox">
+                <div class="metricLabel">Suggested listing price</div>
+                <div class="metricValue">${escapeHtml(moneyVal(suggested))}</div>
+              </div>
+              <div class="metricBox">
+                <div class="metricLabel">Bundle / range</div>
+                <div class="metricValue">${escapeHtml(moneyVal(bundle))}</div>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      const adviceArr = Array.isArray(result.advice) ? result.advice
+        : Array.isArray(result.tips) ? result.tips
+        : Array.isArray(result.advisory?.tips) ? result.advisory.tips
+        : null;
+
+      const adviceHtml = adviceArr && adviceArr.length
+        ? `<div class="status" style="margin-top:12px;"><b>Notes:</b> ${escapeHtml(adviceArr.join(" "))}</div>`
+        : "";
+
+      resultEl.innerHTML = `
+        <div class="resultCards">
+          ${cardsHtml}
+          ${adviceHtml}
+          <details>
+            <summary><b>Show raw JSON</b></summary>
+            <pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre>
+          </details>
+        </div>
+      `;
+    }
+
+    // =========================
+    // Local history UI
+    // =========================
     function renderLocalHistory() {
       const items = readLocalHistory();
       historyEl.innerHTML = "";
@@ -595,26 +777,34 @@
       historyEmptyEl.style.display = "none";
 
       items.forEach((item, idx) => {
-        const title = item?.title || "Scan";
-        const time = item?.created_at ? formatTime(item.created_at) : "";
-        const price = item?.primary_price || "";
-        const bundle = item?.bundle_range || "";
+        const scan = normalizeScanPayload(item?.scan_payload || item);
+        const result = scan?.result || {};
+        const firstItem = Array.isArray(result.items) ? result.items[0] : null;
+
+        const title = firstNonEmpty(firstItem?.name, firstItem?.title, "Saved scan");
+        const time = scan?.created_at ? formatTime(scan.created_at) : "";
+        const bundle = result.bundle_price_range || null;
+        const bundleText = moneyVal(bundle);
 
         const div = document.createElement("div");
         div.className = "historyItem";
-        if (lastSelectedLocalIndex === idx) div.classList.add("selected");
+        if (selectedLocalIndex === idx) div.classList.add("selected");
+
         div.onclick = () => openLocalHistoryItem(idx);
 
-        const thumb = item.thumb;
-        const thumbHtml = thumb
-          ? `<img class="thumb" src="${escapeHtml(thumb)}" alt="thumb" />`
-          : `<div class="thumb thumbPlaceholder">No thumb</div>`;
-
+        // Local history is text-only; show placeholder thumb
         div.innerHTML = `
-          ${thumbHtml}
+          <img class="thumb" src="data:image/svg+xml;utf8,${encodeURIComponent(`
+            <svg xmlns='http://www.w3.org/2000/svg' width='72' height='72'>
+              <rect width='72' height='72' rx='10' ry='10' fill='#f2f2f2'/>
+              <text x='50%' y='52%' dominant-baseline='middle' text-anchor='middle' font-family='Arial' font-size='10' fill='#777'>
+                Saved
+              </text>
+            </svg>
+          `)}" alt="thumb" />
           <div class="historyMeta">
-            <div class="title">${escapeHtml(title)}</div>
-            <div class="line">${escapeHtml(price)} ${bundle ? " • " + escapeHtml(bundle) : ""}</div>
+            <div class="title">${escapeHtml(String(title))}</div>
+            <div>${escapeHtml(bundleText)}</div>
             <div class="time">${escapeHtml(time)}</div>
           </div>
         `;
@@ -627,28 +817,30 @@
       const item = items[index];
       if (!item) return;
 
-      lastSelectedLocalIndex = index;
-      lastSelectedTeamId = null;
+      selectedLocalIndex = index;
+      selectedTeamScanId = null;
       renderLocalHistory();
-      renderTeamHistory(_lastTeamItems);
+      // Clear team selection highlight
+      document.querySelectorAll("#teamHistory .historyItem").forEach(el => el.classList.remove("selected"));
+
+      selectedFile = null;
+      selectedDataUrl = null;
+      detailFiles.length = 0;
+      detailObjectUrls.forEach(u => URL.revokeObjectURL(u));
+      detailObjectUrls.length = 0;
+
+      preview.style.display = "none";
+      previewHint.textContent = "Loaded from local history.";
 
       statusEl.innerHTML = `<span class="ok">Loaded ✅</span>`;
-      renderNormalizedResult(item.payload);
-
-      // Preview thumb if available
-      if (item.thumb) {
-        preview.src = item.thumb;
-        preview.style.display = "block";
-        previewHint.textContent = "Loaded from local history.";
-      }
+      renderResult(item?.scan_payload || item);
     }
 
     // =========================
-    // Team history (shared)
+    // Team History (shared)
+    // Backend expected: GET /history?limit=25 -> { items: [ {scan_id, created_at, image_url, result, analysis_mode} ] }
     // =========================
-    let _lastTeamItems = [];
     function renderTeamHistory(items) {
-      _lastTeamItems = items || [];
       teamHistoryEl.innerHTML = "";
       if (!items || !items.length) {
         teamEmptyEl.style.display = "block";
@@ -657,42 +849,60 @@
       teamEmptyEl.style.display = "none";
 
       items.forEach((item) => {
-        const title = item?.title || item?.result?.items?.[0]?.name || "Scan";
-        const time = item?.created_at ? formatTime(item.created_at) : "";
-        const imgSrc = item.image_url || "";
+        const scanId = item.scan_id ?? item.id ?? null;
+        const result = item.result || {};
+        const firstItem = Array.isArray(result.items) ? result.items[0] : null;
 
-        // Compute primary price + bundle for display
-        const primaryItem = item?.result?.items?.[0] || {};
-        const primaryPrice = formatMoney(primaryItem.estimated_price);
-        const bundle = bundleRangeText(item?.result?.bundle_price_range);
+        const title = firstNonEmpty(firstItem?.name, firstItem?.title, "Unknown item");
+        const time = item?.created_at ? formatTime(item.created_at) : "";
+        const bundle = result.bundle_price_range || null;
+        const bundleText = moneyVal(bundle);
+
+        const imgSrc = item.image_url || "";
 
         const div = document.createElement("div");
         div.className = "historyItem";
-        if (String(lastSelectedTeamId) === String(item.scan_id)) div.classList.add("selected");
+        if (scanId !== null && scanId === selectedTeamScanId) div.classList.add("selected");
 
-        div.onclick = () => {
-          lastSelectedTeamId = item.scan_id;
-          lastSelectedLocalIndex = null;
-          renderTeamHistory(_lastTeamItems);
+        // Tap-proof: no double triggers
+        div.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+
+          selectedTeamScanId = scanId;
+          selectedLocalIndex = null;
+
+          // Update highlights
+          document.querySelectorAll("#teamHistory .historyItem").forEach(el => el.classList.remove("selected"));
+          div.classList.add("selected");
           renderLocalHistory();
 
+          // Load preview image
           if (imgSrc) {
             preview.src = imgSrc;
             preview.style.display = "block";
             previewHint.textContent = "Loaded from team history.";
+          } else {
+            preview.style.display = "none";
+            previewHint.textContent = "Loaded from team history (no image).";
           }
 
           statusEl.innerHTML = `<span class="ok">Loaded ✅</span>`;
-          renderNormalizedResult(item);
-        };
+          renderResult({
+            scan_id: scanId,
+            created_at: item.created_at,
+            analysis_mode: item.analysis_mode,
+            result: result
+          });
+        }, { passive: false });
 
         div.innerHTML = `
           <img class="thumb" src="${escapeHtml(imgSrc)}" alt="thumb" />
           <div class="historyMeta">
-            <div class="title">${escapeHtml(title)}</div>
-            <div class="line">${escapeHtml(primaryPrice)} ${bundle !== "—" ? " • " + escapeHtml(bundle) : ""}</div>
+            <div class="title">${escapeHtml(String(title))}</div>
+            <div>${escapeHtml(bundleText)}</div>
             <div class="time">${escapeHtml(time)}</div>
-            <div style="margin-top:6px;"><span class="pill sharedPill">Shared with your team</span></div>
+            <div class="sharedTag">Shared with your team</div>
           </div>
         `;
         teamHistoryEl.appendChild(div);
@@ -711,197 +921,169 @@
     }
 
     // =========================
-    // Result rendering (NEW normalized JSON)
-    // Expects backend response:
-    // { scan_id, created_at, analysis_mode, result: { items, bundle_price_range, pricing_estimates, suggestions, advice } }
-    // Team history items:
-    // { scan_id, created_at, analysis_mode, title, image_url, result }
+    // File selection
     // =========================
-    function renderNormalizedResult(payload) {
-      rawWrap.style.display = "none";
-      rawWrap.innerHTML = "";
-
-      let scan_id = payload?.scan_id;
-      let created_at = payload?.created_at;
-      let analysis_mode = payload?.analysis_mode;
-      let result = payload?.result;
-
-      // In local history, we store the whole API response as payload
-      if (payload?.payload) {
-        scan_id = payload.payload.scan_id;
-        created_at = payload.payload.created_at;
-        analysis_mode = payload.payload.analysis_mode;
-        result = payload.payload.result;
-      }
-
-      const items = result?.items || [];
-      const bundle = result?.bundle_price_range || {};
-      const suggestions = result?.suggestions || {};
-      const advice = result?.advice || [];
-      const pricing_estimates = result?.pricing_estimates || "";
-
-      resultEl.innerHTML = "";
-
-      if (!items.length) {
-        resultEl.innerHTML = `
-          <div class="resultCard">
-            <div class="resultHeaderRow">
-              <div>
-                <div class="resultName">Result</div>
-                <div class="resultType">No items detected</div>
-              </div>
-              <span class="pill sharedPill">Shared with your team</span>
-            </div>
-            <div style="color:#333; font-weight:700;">
-              No items detected. Try a closer/brighter photo or check raw JSON.
-            </div>
-          </div>
-        `;
-      } else {
-        items.forEach((it) => {
-          const name = it?.name || "Unknown item";
-          const type = it?.type || "Item";
-          const conf = (it?.confidence || "medium").toLowerCase();
-          const confLabel = conf === "high" ? "High confidence" : (conf === "low" ? "Low confidence" : "Medium confidence");
-
-          const est = formatMoney(it?.estimated_price);
-          const bundleText = bundleRangeText(bundle);
-
-          const setNotes = it?.set_collection_notes || {};
-          const setLikely = (setNotes?.is_part_of_set_likely || "unknown").toLowerCase();
-          const setImpact = setNotes?.price_impact || "";
-          const checks = Array.isArray(setNotes?.what_to_check) ? setNotes.what_to_check : [];
-
-          resultEl.innerHTML += `
-            <div class="resultCard">
-              <div class="resultHeaderRow">
-                <div>
-                  <div class="resultName">${escapeHtml(name)}</div>
-                  <div class="resultType">${escapeHtml(type)} • ${escapeHtml(confLabel)}</div>
-                </div>
-                <span class="pill sharedPill">Shared with your team</span>
-              </div>
-
-              <div class="priceGrid">
-                <div class="priceBox">
-                  <div class="priceLabel">Suggested listing price</div>
-                  <div class="priceValue">${escapeHtml(est)}</div>
-                </div>
-                <div class="priceBox">
-                  <div class="priceLabel">Bundle / range</div>
-                  <div class="priceValue">${escapeHtml(bundleText)}</div>
-                </div>
-              </div>
-
-              ${setImpact || checks.length ? `
-                <div style="margin-top:2px; color:#333;">
-                  <div style="font-weight:900; margin-bottom:4px;">Set / collection notes</div>
-                  <div style="font-size:13px; color:#444;">
-                    <div><b>Part of a set?</b> ${escapeHtml(setLikely)}</div>
-                    ${setImpact ? `<div style="margin-top:4px;"><b>Price impact:</b> ${escapeHtml(setImpact)}</div>` : ""}
-                    ${checks.length ? `
-                      <div style="margin-top:6px;"><b>What to check:</b>
-                        <ul style="margin:6px 0 0 18px;">
-                          ${checks.slice(0,6).map(x => `<li>${escapeHtml(x)}</li>`).join("")}
-                        </ul>
-                      </div>` : ""
-                    }
-                  </div>
-                </div>
-              ` : ""}
-
-              ${pricing_estimates ? `
-                <div style="margin-top:2px;">
-                  <div style="font-weight:900; margin-bottom:4px;">Pricing notes</div>
-                  <div style="font-size:13px; color:#444;">${escapeHtml(pricing_estimates)}</div>
-                </div>
-              ` : ""}
-
-              ${(suggestions?.photo_tip || suggestions?.markings_to_look_for) ? `
-                <div style="margin-top:2px;">
-                  <div style="font-weight:900; margin-bottom:4px;">Suggestions</div>
-                  <div style="font-size:13px; color:#444;">
-                    ${suggestions?.photo_tip ? `<div>• ${escapeHtml(suggestions.photo_tip)}</div>` : ""}
-                    ${suggestions?.markings_to_look_for ? `<div>• ${escapeHtml(suggestions.markings_to_look_for)}</div>` : ""}
-                  </div>
-                </div>
-              ` : ""}
-
-              ${Array.isArray(advice) && advice.length ? `
-                <div style="margin-top:2px;">
-                  <div style="font-weight:900; margin-bottom:4px;">Advice</div>
-                  <ul style="margin:6px 0 0 18px; font-size:13px; color:#444;">
-                    ${advice.slice(0,6).map(x => `<li>${escapeHtml(x)}</li>`).join("")}
-                  </ul>
-                </div>
-              ` : ""}
-
-            </div>
-          `;
-        });
-      }
-
-      // Raw JSON toggle
-      rawWrap.style.display = "block";
-      rawWrap.innerHTML = `
-        <details>
-          <summary>Show raw JSON</summary>
-          <pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre>
-        </details>
-      `;
+    function openCamera() {
+      if (!ensureModeChosen()) return;
+      cameraInput.value = "";
+      cameraInput.click();
     }
+
+    function openGallery() {
+      if (!ensureModeChosen()) return;
+      galleryInput.value = "";
+      galleryInput.click();
+    }
+
+    function openDetailPhoto() {
+      if (!ensureModeChosen()) return;
+      if (!selectedFile) {
+        statusEl.innerHTML = `<span class="err">Add a main photo first.</span>`;
+        return;
+      }
+      if (detailFiles.length >= MAX_DETAIL_PHOTOS) {
+        statusEl.innerHTML = `<span class="err">Max detail photos reached (${MAX_DETAIL_PHOTOS}).</span>`;
+        return;
+      }
+      detailInput.value = "";
+      detailInput.click();
+    }
+
+    function resetResultUIForNewPhoto() {
+      statusEl.textContent = "";
+      resultEl.innerHTML = "";
+      selectedTeamScanId = null;
+      selectedLocalIndex = null;
+      document.querySelectorAll(".historyItem.selected").forEach(el => el.classList.remove("selected"));
+    }
+
+    function handleMainFileSelect(file) {
+      if (!file) return;
+
+      selectedFile = file;
+      selectedDataUrl = null;
+
+      // Clear details on new main photo
+      detailFiles.length = 0;
+      detailObjectUrls.forEach(u => URL.revokeObjectURL(u));
+      detailObjectUrls.length = 0;
+
+      resetResultUIForNewPhoto();
+
+      // Prevent Analyze until base64 is ready
+      analyzeBtn.disabled = true;
+      previewHint.textContent = "Loading image…";
+
+      if (lastObjectUrl) URL.revokeObjectURL(lastObjectUrl);
+      lastObjectUrl = URL.createObjectURL(file);
+
+      preview.src = lastObjectUrl;
+      preview.style.display = "block";
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        selectedDataUrl = reader.result;
+        previewHint.textContent = "Ready to analyze.";
+        updateAnalyzeEnabled();
+      };
+      reader.onerror = () => {
+        previewHint.textContent = "Could not read image.";
+        updateAnalyzeEnabled();
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function handleDetailFileSelect(file) {
+      if (!file) return;
+      if (detailFiles.length >= MAX_DETAIL_PHOTOS) return;
+
+      detailFiles.push(file);
+
+      // For now we don't render a detail gallery in UI (keeps it clean)
+      // but we can show a small status hint:
+      statusEl.innerHTML = `<span class="ok">Added detail photo ✅</span> (${detailFiles.length}/${MAX_DETAIL_PHOTOS})`;
+
+      updateAnalyzeEnabled();
+    }
+
+    cameraInput.addEventListener("change", () => handleMainFileSelect(cameraInput.files?.[0]));
+    galleryInput.addEventListener("change", () => handleMainFileSelect(galleryInput.files?.[0]));
+    detailInput.addEventListener("change", () => handleDetailFileSelect(detailInput.files?.[0]));
+
+    // =========================
+    // Mode selection behavior (force pick one)
+    // =========================
+    modeSingleEl.addEventListener("change", () => {
+      if (modeSingleEl.checked) modeMultiEl.checked = false;
+      setModeError(false);
+      updateAnalyzeEnabled();
+    });
+
+    modeMultiEl.addEventListener("change", () => {
+      if (modeMultiEl.checked) modeSingleEl.checked = false;
+      setModeError(false);
+      updateAnalyzeEnabled();
+    });
 
     // =========================
     // Analyze
+    // POST /analyze-image
+    // form-data:
+    //   file: main image
+    //   detail_files: optional (multiple)
+    //   analysis_mode: "single" | "multi"
     // =========================
     async function analyze() {
-      if (!ensureModeChosen()) {
-        statusEl.innerHTML = `<span class="err">Choose One Item or Many Items first.</span>`;
+      if (!ensureModeChosen()) return;
+
+      if (!selectedFile) {
+        statusEl.innerHTML = `<span class="err">Add a main photo first.</span>`;
         return;
       }
-      if (!selectedFiles.length) {
-        statusEl.innerHTML = `<span class="err">Add a photo first.</span>`;
+      if (!selectedDataUrl) {
+        statusEl.innerHTML = `<span class="err">Please wait—image still loading.</span>`;
         return;
       }
+
+      // Enforce photo limit
+      const totalPhotos = 1 + detailFiles.length;
+      if (totalPhotos > MAX_PHOTOS_PER_SCAN) {
+        statusEl.innerHTML = `<span class="err">Too many photos. Max per scan is ${MAX_PHOTOS_PER_SCAN}.</span>`;
+        return;
+      }
+
+      const analysisMode = getSelectedMode();
 
       analyzeBtn.disabled = true;
       statusEl.textContent = "Analyzing…";
       resultEl.innerHTML = "";
-      rawWrap.style.display = "none";
 
       const formData = new FormData();
-      // backend expects "images" list
-      selectedFiles.slice(0, MAX_PHOTOS_PER_SCAN).forEach(f => formData.append("images", f));
+      formData.append("file", selectedFile);
       formData.append("analysis_mode", analysisMode);
+
+      // Add detail photos (backend should accept these as optional)
+      detailFiles.forEach((f) => formData.append("detail_files", f));
 
       try {
         const resp = await fetch("/analyze-image", { method: "POST", body: formData });
         const data = await readJsonOrText(resp);
 
         if (!resp.ok) {
-          const msg = data?.detail || data?.error || `Server error ${resp.status}`;
+          const msg = data?.detail || `Server error ${resp.status}`;
           throw new Error(msg);
         }
 
         statusEl.innerHTML = `<span class="ok">Done ✅</span>`;
-        renderNormalizedResult(data);
+        renderResult(data);
 
-        // Save local history (compressed thumb + important summary)
-        const firstItem = data?.result?.items?.[0] || {};
-        const title = firstItem?.name || "Scan";
-        const primaryPrice = formatMoney(firstItem?.estimated_price);
-        const bundle = bundleRangeText(data?.result?.bundle_price_range);
-
+        // Save text-only local history
         addToLocalHistory({
-          created_at: data?.created_at || nowIso(),
-          title,
-          primary_price: primaryPrice,
-          bundle_range: bundle,
-          thumb: selectedThumbDataUrl,
-          payload: data
+          created_at: nowIso(),
+          scan_payload: data
         });
 
-        // Refresh shared team history
+        // Refresh shared history
         await refreshTeamHistory();
 
       } catch (e) {
@@ -909,7 +1091,7 @@
         statusEl.innerHTML = `<span class="err">Error:</span> ${escapeHtml(e.message)}`;
         resultEl.innerHTML = "";
       } finally {
-        analyzeBtn.disabled = false;
+        updateAnalyzeEnabled();
       }
     }
 
@@ -918,7 +1100,8 @@
     // =========================
     renderLocalHistory();
     refreshTeamHistory();
-    ensureModeChosen();
+    ensureModeChosen(); // show prompt until user picks one
+    updateAnalyzeEnabled();
   </script>
 </body>
 </html>
